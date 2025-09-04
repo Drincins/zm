@@ -1,0 +1,41 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+*.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Credentials / secrets
+gsheets_service.json
+*.key
+*.pem
+
+# Data dirs
+data/exported_summaries/
+data/bank_statements/new/
+data/bank_statements/archiv/

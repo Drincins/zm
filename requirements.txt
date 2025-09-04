@@ -1,0 +1,13 @@
+streamlit
+pandas
+sqlalchemy
+st-aggrid
+gspread
+gspread-formatting
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+oauth2client
+xlsxwriter
+psycopg2-binary
+python-dotenv

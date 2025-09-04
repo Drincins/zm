@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "inner-geography-458719-f9",
+  "private_key_id": "345ec08a37b1e663000e844bc1c6123d0f4deb92",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCReLjIltyz2GrE\ng0dx9g2D1qYZjlPKjZ0uZebb/XyMU2hTHnCKvpYDObBld7lL3eTTMyLhxyw8tRuz\nReoIraAbV64kebNvBl/I2BvrIY/P8fj+Wx3YoKSaP+zTk6oZQ6QIbaYRX/r67YCI\n0J57U3nmGwqvJvjZS/LZwRlZoTIlcKYyq4nZSH6+gT/ROkR5b20/Sc3EIP7vaE/b\ngpdtOwuEn8a3nW5AKwvT+XoLL74PALG7tbpR/O8mCvJjB4Pu5DIkRdKve4Oo7yDe\n09iN1HvXqX9xAf1NXxoI+8uVYh3za4eYTeM8Z1Z9zO3J9Q5/L/8XZ+APdPZirck9\n90km8ASdAgMBAAECggEAAio8kcljSDNa/SRv4vuEsLAc6EwILsh4nyxeW2rNk/A0\najMf2KjEwccaX8A3d4vMgoWWYM/59lowhmtumHLloi34PQLgGLGMzmNWIL84DTRJ\n7E10tS+2SkdmRmgdsXVHCcHuSdt7LxuP6l3rU5vUgYgfWqfUwZDbJ53Fu0+vV98j\nN6I6lp3mL4iY9AWEuAbOuh3xF+8C7O/ctR38/LosC3mRn1C0eX2WZx7eFR+TKVQL\n+R2ZD4ZSvLbgTRwLBGhoWR1dA7nttKhMIN3zZAuozg/5P/MocUDfWMDc9uJapws7\nPpeTvaYaxcSKYjQFNucqgTuPdzfYIpm2FZkirOyQrwKBgQDGLhp8fQcP74NizKJ9\nbYFwKUtJD7Spx8Y5C2Wjnxs3kctDaZUBOHCU75J0fyXBp3X5ymy/kRkqHW1uxYeP\nCSzc66gUWFk5LhgxJTv1hqyXsBQx8wNyJkUVwisIZ0uLSd/XKU4HHlgCtpkhb/jA\nudFznPnp2k9MlsSw9LFZ8qRaqwKBgQC76d2A2WspLa/gV7Cvtm7jNxO95jVTiY1M\nJ9aolsunfyVKP5rhxvBRLGXOVmEWi6H/wodE9lUbGDPPeOORRCFvGxuoHpsU4FbC\nH/j4RSQuUY+r42MsDNQUiQ1kQG7/CDbuGogWSduMR53yEG0OLhtNX/pnsHtg+ebH\nI9BVSeed1wKBgQCUtJN7RfW+p2JXCGYE595wYwvyzq4pl5XNyBeEJyctE2EKPHdq\nawdPOlUSxTV3kkicHqBrPl07lMlAjUeitKfNPabpXUHV/hh5CA9ttJhdWepNcKPt\nS3obUY8oxxmQcuZbdMrv3Hz9zDYrOPHW65eWwPtl1kIanicJARLzA3b/8QKBgCaP\nLqyp8JtajKR0WgU0YjytqJdnDbo+l4fxBNNDXjbYmEZMFvQNZnLBsYJNp06BCJT6\nzdcQ1RXiOX9xRwEgAdxSq7Ir1ZbLEgJznRsU1P/MLLcQyeDYIQy1stHHhv8+KEdj\nmlk4fpyidX6ecEJgo6mU8EUmqaqUnQ5wAuf9alGxAoGAVxC3C/vhdEwy1T9QRSJ5\n2uAQcEDrj/qZ4i8AFUkcSWV6u1of+GRd0R120uS/2BKsY+Xjk1dJD6YWBGw4kykP\nhLxHj4Xc9AMmVw7njsfTnnrZ/ZrMiUt5g0S8+zM/8qqZAYUc2Q1DiDtVvbggVdbT\nK0IHt7tztrcjI3vQN15fR/A=\n-----END PRIVATE KEY-----\n",
+  "client_email": "adminredaction@inner-geography-458719-f9.iam.gserviceaccount.com",
+  "client_id": "109070878436280607490",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/adminredaction%40inner-geography-458719-f9.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
