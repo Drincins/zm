@@ -9,8 +9,8 @@ from core.parser import clean_inn
 from db_models import statement as m_statement  # для проверки дублей в основной таблице
 from datetime import datetime  # NEW
 
-NEW_DIR = r"C:\Users\Admin\Desktop\ZM\data\bank_statements\new"
-ARCHIVE_DIR = r"C:\Users\Admin\Desktop\ZM\data\bank_statements\archiv"
+NEW_DIR = r"C:\Users\Genius\Desktop\ZM\data\bank_statements\new"
+ARCHIVE_DIR = r"C:\Users\Genius\Desktop\ZM\data\bank_statements\archiv"
 
 # --- Вспомогательные функции ---
 def find_firm_or_company_by_inn(inn, session):

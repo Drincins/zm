@@ -1,7 +1,7 @@
 streamlit
 pandas
 sqlalchemy
-st-aggrid
+streamlit-aggrid
 gspread
 gspread-formatting
 google-auth
