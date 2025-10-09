@@ -6,6 +6,9 @@ import tabs.main  # импорт твоего основного меню
 
 from streamlit_cookies_manager import EncryptedCookieManager
 
+# Глобальная конфигурация страницы
+st.set_page_config(page_title="ZM", layout="wide", initial_sidebar_state="expanded")
+
 # --- Настройка cookies (измени пароль на свой уникальный!)
 cookies = EncryptedCookieManager(
     prefix="mybank_", password="MY_SUPER_SECRET_2024"

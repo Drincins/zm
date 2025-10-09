@@ -20,7 +20,7 @@ def analytics_tab():
     st.write("Здесь будет аналитика.")
 
 def render_main_menu(cookies):
-    st.set_page_config(page_title="Банк", page_icon="🏦", layout="wide")
+    
     menu = st.sidebar.radio(  
         "Меню", 
         [

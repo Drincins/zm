@@ -24,19 +24,19 @@ class Statement(Base):
     parent_company = Column(String)
     payer_raw = Column(String, comment="Плательщик (оригинал из выписки)")
     receiver_raw = Column(String, comment="Получатель (оригинал из выписки)")
-    paid_for_company_id = Column(Integer, ForeignKey('company.id'), nullable=True, index=True)  # За кого платили
+    paid_for_company_id = Column(Integer, ForeignKey('company.id', ondelete='SET NULL'), nullable=True, index=True)  # За кого платили
 
     # FK
-    payer_company_id    = Column(Integer, ForeignKey('company.id'),   nullable=True, comment="Плательщик (Company)")
-    payer_firm_id       = Column(Integer, ForeignKey('firms.id'),     nullable=True, comment="Плательщик (Firm)")
-    receiver_company_id = Column(Integer, ForeignKey('company.id'),   nullable=True, comment="Получатель (Company)")
-    receiver_firm_id    = Column(Integer, ForeignKey('firms.id'),     nullable=True, comment="Получатель (Firm)")
-    up_company_id       = Column(Integer, ForeignKey('up_company.id'), index=True)
-    group_id            = Column(Integer, ForeignKey('groups.id'),      index=True)
-    category_id         = Column(Integer, ForeignKey('categories.id'),   index=True)
+    payer_company_id    = Column(Integer, ForeignKey('company.id', ondelete='SET NULL'),   nullable=True, comment="Плательщик (Company)")
+    payer_firm_id       = Column(Integer, ForeignKey('firms.id', ondelete='SET NULL'),     nullable=True, comment="Плательщик (Firm)")
+    receiver_company_id = Column(Integer, ForeignKey('company.id', ondelete='SET NULL'),   nullable=True, comment="Получатель (Company)")
+    receiver_firm_id    = Column(Integer, ForeignKey('firms.id', ondelete='SET NULL'),     nullable=True, comment="Получатель (Firm)")
+    up_company_id       = Column(Integer, ForeignKey('up_company.id', ondelete='SET NULL'), index=True, nullable=True)
+    group_id            = Column(Integer, ForeignKey('groups.id', ondelete='SET NULL'),      index=True, nullable=True)
+    category_id         = Column(Integer, ForeignKey('categories.id', ondelete='SET NULL'),   index=True, nullable=True)
 
     # NEW: "За кого платили" — по умолчанию = up_company_id
-    za_kogo_platili_id  = Column(Integer, ForeignKey('up_company.id'), index=True, nullable=True)
+    za_kogo_platili_id  = Column(Integer, ForeignKey('up_company.id', ondelete='SET NULL'), index=True, nullable=True)
 
     # Relationships
     payer_firm       = relationship('Firm',     foreign_keys=[payer_firm_id])
