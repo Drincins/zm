@@ -7,8 +7,7 @@ from db_models import category, group
 def redact_category():
     st.subheader("Категории")
 
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         # --- справочник групп
         groups_all = session.query(group.Group).order_by(group.Group.name.asc()).all()
         group_name_to_id = {g.name: g.id for g in groups_all}
@@ -107,5 +106,3 @@ def redact_category():
                         except Exception as e:
                             session.rollback()
                             st.error(f"Ошибка добавления: {e}")
-    finally:
-        session.close()

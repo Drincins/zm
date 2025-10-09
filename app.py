@@ -10,13 +10,19 @@ from streamlit_cookies_manager import EncryptedCookieManager
 st.set_page_config(page_title="ZM", layout="wide", initial_sidebar_state="expanded")
 
 # --- Настройка cookies (измени пароль на свой уникальный!)
+load_dotenv()
+COOKIE_PASSWORD = os.getenv("COOKIE_PASSWORD")
+if not COOKIE_PASSWORD:
+    st.error("Не указан COOKIE_PASSWORD в .env")
+    st.stop()
+
+# --- Работа с cookies (иначе старые сессии попадут в странное состояние!)
 cookies = EncryptedCookieManager(
-    prefix="mybank_", password="MY_SUPER_SECRET_2024"
+    prefix="mybank_", password=COOKIE_PASSWORD
 )
 if not cookies.ready():
     st.stop()
 
-load_dotenv()
 LOGIN = os.getenv("LOGIN")
 PASSWORD = os.getenv("PASSWORD")
 

@@ -1,28 +1,32 @@
 import pandas as pd
 
-# === Укажи пути к своим файлам ===
-csv_path = "C:\Users\Admin\Desktop\ZMB\data\reference_data\firms_mapping.csv"    # исходный csv
-excel_path = "C:\Users\Admin\Desktop\ZMB\data\reference_data\firms_mapping.xlsx" 
-# === Загружаем CSV ===
-df = pd.read_csv(csv_path, dtype=str)
+# === Source CSV and target Excel paths ===
+CSV_PATH = r"C:\Users\Admin\Desktop\ZMB\data\reference_data\firms_mapping.csv"    # original csv
+EXCEL_PATH = r"C:\Users\Admin\Desktop\ZMB\data\reference_data\firms_mapping.xlsx"
 
-# === Опционально: поправим ИНН, если они выглядят как float ===
+
 def fix_inn(val):
-    # Если это число и оканчивается на .0 — привести к целому
+    """Normalises values that arrive as strings like '1234567890.0'."""
     try:
         if isinstance(val, str) and val.endswith('.0'):
             return str(int(float(val)))
-    except:
+    except Exception:
         pass
     return str(val)
 
-if "ИНН" in df.columns:
-    df["ИНН"] = df["ИНН"].apply(fix_inn)
-elif "inn" in df.columns:
-    df["inn"] = df["inn"].apply(fix_inn)
 
-# === Сохраняем в Excel (XLSX) ===
-df.to_excel(excel_path, index=False)
+def convert_csv_to_excel(csv_path: str = CSV_PATH, excel_path: str = EXCEL_PATH) -> None:
+    """Loads the CSV, fixes INN column formatting, and writes an Excel copy."""
+    df = pd.read_csv(csv_path, dtype=str)
 
-print(f"Готово! CSV '{csv_path}' преобразован в Excel '{excel_path}'.")
+    if '\u0418\u041d\u041d' in df.columns:  # 'ИНН'
+        df['\u0418\u041d\u041d'] = df['\u0418\u041d\u041d'].apply(fix_inn)
+    elif 'inn' in df.columns:
+        df['inn'] = df['inn'].apply(fix_inn)
 
+    df.to_excel(excel_path, index=False)
+    print(f"Готово! CSV '{csv_path}' сконвертирован в Excel '{excel_path}'.")
+
+
+if __name__ == '__main__':
+    convert_csv_to_excel()

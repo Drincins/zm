@@ -1,13 +1,10 @@
 import pandas as pd
 import re
 from db_models import company as company_model
+from core.months import RU_MONTHS_MAP
 
 # === Русские месяцы для отчётного месяца ===
-RUS_MONTHS = {
-    1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
-    5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
-    9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
-}
+RUS_MONTHS = RU_MONTHS_MAP
 
 def try_float(val):
     """Безопасное приведение суммы к float с поддержкой запятой и пробелов."""

@@ -11,8 +11,7 @@ from db_models import company, up_company
 # ----------------------------- ВКЛАДКА -----------------------------
 
 def redact_company():
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         tabs = st.tabs(["Головная компания", "Компании"])
 
         # ========== ТАБ 1: Головная компания ==========
@@ -239,5 +238,3 @@ def redact_company():
                                 session.rollback()
                                 st.error(f"Ошибка добавления: {e}")
 
-    finally:
-        session.close()

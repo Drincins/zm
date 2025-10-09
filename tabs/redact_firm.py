@@ -8,8 +8,7 @@ from db_models import firm, category
 def redact_firm():
     st.subheader("Фирмы")
 
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         # ---- Справочник категорий
         categories = session.query(category.Category).order_by(category.Category.name.asc()).all()
         cat_id_by_name = {c.name: c.id for c in categories}
@@ -168,5 +167,3 @@ def redact_firm():
                             session.rollback()
                             st.error(f"Ошибка добавления: {e}")
 
-    finally:
-        session.close()

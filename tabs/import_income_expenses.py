@@ -5,6 +5,7 @@ import streamlit as st
 
 from core.db import SessionLocal
 from core.utils import normalize_amount_by_type
+from core.months import RU_MONTHS, ru_label_from_rm, rm_from_ru_label
 from db_models import (
     up_company as m_up,
     company as m_company,
@@ -28,38 +29,16 @@ def _fmt_num(x) -> str:
 
 
 # Русские месяцы + конвертеры
-RU_MONTHS = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-]
-
-def _ru_month_name(month_num: int) -> str:
-    return RU_MONTHS[month_num - 1] if 1 <= month_num <= 12 else ""
-
-def _ru_label_from_rm(rm: str) -> str:
-    """'YYYY-MM' -> 'Месяц YYYY' (рус.)."""
-    try:
-        y, m = str(rm).split("-")
-        m = int(m)
-        return f"{_ru_month_name(m)} {y}"
-    except Exception:
-        return str(rm or "")
-
-def _rm_from_ru_label(label: str) -> str:
-    """'Месяц YYYY' -> 'YYYY-MM'."""
-    try:
-        name, year = label.strip().rsplit(" ", 1)
-        m = RU_MONTHS.index(name) + 1
-        return f"{int(year):04d}-{m:02d}"
-    except Exception:
-        return ""
-
+# RU month helpers (см. core.months)
 
 def import_income_expenses_tab():
     st.subheader("Импорт расходов/доходов")
 
-    session = SessionLocal()
+    with SessionLocal() as session:
+        _render_import_income_expenses(session)
 
+
+def _render_import_income_expenses(session):
     # --- 1) Выбор головной компании (обязательно) ---
     ups = session.query(m_up.UpCompany).order_by(m_up.UpCompany.name.asc()).all()
     up_names = [u.name for u in ups]
@@ -67,7 +46,6 @@ def import_income_expenses_tab():
     up_obj = next((u for u in ups if u.name == up_choice), None)
     if not up_obj:
         st.info("Выберите головную.")
-        session.close()
         return
 
     # --- 2) Фильтры предпросмотра (по выбранной головной) ---
@@ -97,12 +75,12 @@ def import_income_expenses_tab():
         st.caption("Пока записей нет — подставлен текущий месяц для фильтра.")
 
     # Преобразуем в русские ярлыки 'Месяц YYYY'
-    months_labels = [_ru_label_from_rm(rm) for rm in months_rm]
+    months_labels = [ru_label_from_rm(rm) for rm in months_rm]
     default_labels = months_labels[:1] if months_labels else []
     sel_months_labels = st.multiselect("Учётный месяц(ы)", options=months_labels, default=default_labels)
 
     # Обратно к 'YYYY-MM' для запроса
-    sel_months_rm = [_rm_from_ru_label(lbl) for lbl in (sel_months_labels or default_labels)]
+    sel_months_rm = [rm_from_ru_label(lbl) for lbl in (sel_months_labels or default_labels)]
 
     # --- 3) Предпросмотр записей по выбранным фильтрам ---
     q = session.query(m_ie.IncomeExpense).filter(
@@ -123,7 +101,7 @@ def import_income_expenses_tab():
             data.append({
                 "id": r.id,
                 "Дата": r.date,
-                "Месяц": _ru_label_from_rm(r.report_month) if r.report_month else "",
+                "Месяц": ru_label_from_rm(r.report_month) if r.report_month else "",
                 "Головная": r.up_company.name if r.up_company else "",
                 "Компания": r.company.name if r.company else "",
                 "Группа": r.group.name if r.group else "",
@@ -349,4 +327,3 @@ def import_income_expenses_tab():
                             session.rollback()
                             st.error(f"Ошибка удаления: {e}")
 
-    session.close()

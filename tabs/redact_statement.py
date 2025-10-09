@@ -3,41 +3,18 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 from core.db import SessionLocal
+from core.months import ru_label_from_rm, rm_from_ru_label
 from db_models import statement, company, up_company, category, group, firm
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from io import BytesIO  # для формирования XLSX в памяти
 
 # ----------------------------- RU months helpers -----------------------------
-_RU_MONTHS = [
-    "Январь","Февраль","Март","Апрель","Май","Июнь",
-    "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"
-]
-
-def _ru_label_from_rm(rm: str) -> str:
-    """YYYY-MM -> 'Месяц ГГГГ' (ru)"""
-    if not rm or len(rm) != 7 or "-" not in rm:
-        return rm or "—"
-    y, m = rm.split("-")
-    try:
-        return f"{_RU_MONTHS[int(m)-1]} {y}"
-    except Exception:
-        return rm
-
-def _rm_from_ru_label(label: str) -> str | None:
-    """'Месяц ГГГГ' (ru) -> YYYY-MM"""
-    try:
-        name, y = label.strip().split()
-        m = _RU_MONTHS.index(name) + 1
-        return f"{y}-{m:02d}"
-    except Exception:
-        return None
-
+# Используем общие функции из core.months.
 
 def redact_statement():
     st.title("Мастер-таблица Statement")
 
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         # ----------------------------- Справочники -----------------------------
         companies = session.query(company.Company).all()
         up_companies = session.query(up_company.UpCompany).all()
@@ -63,6 +40,8 @@ def redact_statement():
 
         # ----------------------------- Данные -----------------------------
         stmts = session.query(statement.Statement).all()
+        all_report_months = sorted({s.report_month for s in stmts if s.report_month})
+        all_operation_types = sorted({(s.operation_type or "").strip() for s in stmts if s.operation_type})
         rows = []
         for s in stmts:
             rid = f"RID_{s.row_id}" if getattr(s, "row_id", None) else "—"
@@ -318,7 +297,7 @@ def redact_statement():
                 continue
 
         # ----------------------------- Кнопки под таблицей -----------------------------
-        c_rec, c_export, c_edit = st.columns([1.3, 1.6, 2.2])  # добавили среднюю колонку для экспорта
+        c_rec, c_delete, c_export, c_edit = st.columns([1.2, 1.2, 1.6, 2.2])  # добавили блок удаления и экспорта
 
         # Записать (recorded=True) выбранные
         with c_rec:
@@ -337,6 +316,29 @@ def redact_statement():
                     except Exception as e:
                         session.rollback()
                         st.error(f"Ошибка пометки: {e}")
+        # Массовое удаление
+        with c_delete:
+            st.caption(f"Удаление: выделено {len(selected_ids)}")
+            confirm_key = "stmt_bulk_delete_confirm"
+            confirm_delete = st.checkbox("Подтверждаю удаление", key=confirm_key)
+            delete_disabled = len(selected_ids) == 0
+            if st.button("🗑 Удалить выбранные", use_container_width=True, disabled=delete_disabled):
+                if not selected_ids:
+                    st.warning("Не выбрано ни одной строки.")
+                elif not confirm_delete:
+                    st.warning("Отметьте галочку подтверждения перед удалением.")
+                else:
+                    try:
+                        deleted = session.query(statement.Statement) \
+                            .filter(statement.Statement.id.in_(selected_ids)) \
+                            .delete(synchronize_session=False)
+                        session.commit()
+                        st.success(f"Удалено операций: {deleted}")
+                        st.session_state[confirm_key] = False
+                        st.rerun()
+                    except Exception as e:
+                        session.rollback()
+                        st.error(f"Ошибка удаления: {e}")
         # --- Экспорт в Excel: только выделенные строки ---
         with c_export:
             st.caption(f"Экспорт: выделено {len(selected_ids)}")
@@ -419,14 +421,14 @@ def redact_statement():
                         month_label_to_value = {}
                         for rm in sorted(set(all_rms)):
                             if isinstance(rm, str) and len(rm) == 7 and rm[4] == "-":
-                                label = _ru_label_from_rm(rm)
+                                label = ru_label_from_rm(rm)
                             else:
                                 label = rm
                             month_label_to_value[label] = rm
 
                         ru_month_opts = list(month_label_to_value.keys()) or ["—"]
                         cur_month_label = (
-                            _ru_label_from_rm(obj.report_month)
+                            ru_label_from_rm(obj.report_month)
                             if (obj.report_month and isinstance(obj.report_month, str) and len(obj.report_month) == 7 and obj.report_month[4] == "-")
                             else (obj.report_month or "—")
                         )
@@ -488,7 +490,7 @@ def redact_statement():
                         try:
                             obj.report_month = (
                                 month_label_to_value.get(new_month_label)
-                                or _rm_from_ru_label(new_month_label)
+                                or rm_from_ru_label(new_month_label)
                                 or (new_month_label if new_month_label != "—" else None)
                             )
                             obj.operation_type = (new_type or "").strip().lower()
@@ -547,45 +549,122 @@ def redact_statement():
                                 session.rollback()
                                 st.error(f"Ошибка при удалении: {e}")
 
-        # ----------------------------- Массовое присвоение категории -----------------------------
-        with st.expander(f"Массовое присвоение категории — выделено {len(selected_ids)}"):
-            st.caption("Выберите категорию. Её group_id автоматически запишется в каждую выбранную операцию.")
-            col_me1, col_me2 = st.columns([2, 1])
+# ----------------------------- Массовое изменение параметров -----------------------------
+        with st.expander(f"Массовое изменение параметров — выделено {len(selected_ids)}"):
+            st.caption("Выберите параметр и задайте новое значение для всех выделенных строк.")
+            bulk_field = st.selectbox(
+                "Что изменить",
+                options=["Категория", "Отчётный месяц", "Тип операции"],
+                key="stmt_bulk_field",
+            )
 
-            with col_me1:
-                bulk_cat_name = st.selectbox(
-                    "Новая категория",
-                    options=["—"] + cat_names_all,
+            target_category = None
+            target_month = None
+            month_error = None
+            target_operation_type = ""
+
+            if bulk_field == "Категория":
+                col_cat_select = st.columns([2, 1])
+                with col_cat_select[0]:
+                    bulk_cat_name = st.selectbox(
+                        "Новая категория",
+                        options=["—"] + cat_names_all,
+                        index=0,
+                        key="stmt_bulk_category_select",
+                    )
+                    if bulk_cat_name != "—":
+                        target_category = next((c for c in categories if c.name == bulk_cat_name), None)
+                with col_cat_select[1]:
+                    st.write("")
+                    st.caption("Будет обновлён и group_id.")
+
+            elif bulk_field == "Отчётный месяц":
+                month_label_to_value = {}
+                for rm in all_report_months:
+                    label = ru_label_from_rm(rm) if isinstance(rm, str) else str(rm)
+                    month_label_to_value[label] = rm
+                month_options = ["—"] + sorted(month_label_to_value.keys())
+                month_choice = st.selectbox(
+                    "Новый отчётный месяц",
+                    options=month_options,
                     index=0,
-                    key="bulk_cat_only_select",
+                    key="stmt_bulk_month_select",
                 )
-                bulk_cat = next((c for c in categories if c.name == bulk_cat_name), None) if bulk_cat_name != "—" else None
-
-            with col_me2:
-                can_apply = len(selected_ids) > 0 and (bulk_cat is not None)
-                if st.button("✳️ Применить к выбранным", use_container_width=True, disabled=not can_apply, key="btn_bulk_cat_apply"):
-                    if not selected_ids:
-                        st.warning("Не выбрано ни одной строки.")
-                    elif not bulk_cat:
-                        st.warning("Не выбрана категория.")
+                month_manual = st.text_input(
+                    "Или введите вручную (формат YYYY-MM)",
+                    key="stmt_bulk_month_manual",
+                ).strip()
+                if month_manual:
+                    if (
+                        len(month_manual) == 7
+                        and month_manual[4] == "-"
+                        and month_manual[:4].isdigit()
+                        and month_manual[5:].isdigit()
+                    ):
+                        target_month = month_manual
                     else:
-                        try:
-                            updated = 0
-                            for rid in selected_ids:
-                                s_obj = session.get(statement.Statement, rid)
-                                if not s_obj:
-                                    continue
-                                # Категория приоритетна: ставим category_id и синхронизируем group_id
-                                s_obj.category_id = bulk_cat.id
-                                s_obj.group_id = bulk_cat.group_id
-                                updated += 1
+                        month_error = "Введите месяц в формате YYYY-MM."
+                elif month_choice != "—":
+                    target_month = month_label_to_value.get(month_choice, month_choice)
+                if month_error:
+                    st.warning(month_error)
 
-                            session.commit()
-                            st.success(f"Обновлено строк: {updated}")
-                            st.rerun()
-                        except Exception as e:
-                            session.rollback()
-                            st.error(f"Ошибка массового изменения: {e}")
+            elif bulk_field == "Тип операции":
+                op_options = ["—"] + all_operation_types
+                op_choice = st.selectbox(
+                    "Новый тип операции",
+                    options=op_options,
+                    index=0,
+                    key="stmt_bulk_op_select",
+                )
+                op_custom = st.text_input(
+                    "Или введите вручную",
+                    key="stmt_bulk_op_custom",
+                ).strip()
+                if op_custom:
+                    target_operation_type = op_custom
+                elif op_choice != "—":
+                    target_operation_type = op_choice
+
+            can_apply = False
+            if bulk_field == "Категория":
+                can_apply = bool(selected_ids and target_category)
+            elif bulk_field == "Отчётный месяц":
+                can_apply = bool(selected_ids and target_month and not month_error)
+            elif bulk_field == "Тип операции":
+                can_apply = bool(selected_ids and target_operation_type)
+
+            if st.button("🔧 Применить к выбранным", use_container_width=True, disabled=not can_apply, key="btn_bulk_apply"):
+                if not selected_ids:
+                    st.warning("Не выбрано ни одной строки.")
+                elif bulk_field == "Категория" and not target_category:
+                    st.warning("Выберите категорию.")
+                elif bulk_field == "Отчётный месяц" and (month_error or not target_month):
+                    st.warning(month_error or "Выберите или введите месяц.")
+                elif bulk_field == "Тип операции" and not target_operation_type:
+                    st.warning("Укажите тип операции.")
+                else:
+                    try:
+                        updated = 0
+                        for rid in selected_ids:
+                            s_obj = session.get(statement.Statement, rid)
+                            if not s_obj:
+                                continue
+                            if bulk_field == "Категория" and target_category:
+                                s_obj.category_id = target_category.id
+                                s_obj.group_id = target_category.group_id
+                            elif bulk_field == "Отчётный месяц" and target_month:
+                                s_obj.report_month = target_month
+                            elif bulk_field == "Тип операции" and target_operation_type:
+                                s_obj.operation_type = target_operation_type
+                            updated += 1
+
+                        session.commit()
+                        st.success(f"Обновлено строк: {updated}")
+                        st.rerun()
+                    except Exception as e:
+                        session.rollback()
+                        st.error(f"Ошибка массового изменения: {e}")
 
         st.divider()
 
@@ -643,6 +722,3 @@ def redact_statement():
                 except Exception as e:
                     session.rollback()
                     st.error(f"Ошибка при сохранении: {e}")
-
-    finally:
-        session.close()

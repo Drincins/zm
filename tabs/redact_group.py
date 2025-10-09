@@ -7,8 +7,7 @@ from db_models import group
 def redact_group():
     st.subheader("Группы")
 
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         # ---- Таблица предпросмотра (без индекса и id)
         groups = (
             session.query(group.Group)
@@ -89,5 +88,3 @@ def redact_group():
                         except Exception as e:
                             session.rollback()
                             st.error(f"Ошибка добавления: {e}")
-    finally:
-        session.close()

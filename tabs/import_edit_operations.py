@@ -5,30 +5,11 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from core.db import SessionLocal
+from core.months import RU_MONTHS, ru_label_from_rm, rm_from_ru_label
 from db_models import editbank, statement, firm, company, category, group, up_company
 from core.parser import clean_inn  # используем единую очистку ИНН
 
-# --- RU months helpers (единообразно с redact_statement) ---
-_RU_MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"]
-
-def _ru_label_from_rm(rm: str) -> str:
-    """YYYY-MM -> 'Месяц ГГГГ' (ru). Если формат иной — вернуть как есть."""
-    if not rm or len(rm) != 7 or "-" not in rm:
-        return rm or "—"
-    y, m = rm.split("-")
-    try:
-        return f"{_RU_MONTHS[int(m)-1]} {y}"
-    except Exception:
-        return rm
-
-def _rm_from_ru_label(label: str) -> str | None:
-    """'Месяц ГГГГ' (ru) -> YYYY-MM"""
-    try:
-        name, y = label.strip().split()
-        m = _RU_MONTHS.index(name) + 1
-        return f"{y}-{m:02d}"
-    except Exception:
-        return None
+# --- RU months helpers (используем core.months) ---
 
 def _is_rm_yyyy_mm(s: str) -> bool:
     return isinstance(s, str) and len(s) == 7 and s[4] == "-"
@@ -43,8 +24,7 @@ def import_edit_operations_tab():
     </style>
     """, unsafe_allow_html=True)
 
-    session = SessionLocal()
-    try:
+    with SessionLocal() as session:
         # --- Справочники ---
         firms = session.query(firm.Firm).all()
         companies = session.query(company.Company).all()
@@ -137,7 +117,7 @@ def import_edit_operations_tab():
 
         month_label_to_value = {}
         for rm in all_rm_values:
-            label = _ru_label_from_rm(rm) if _is_rm_yyyy_mm(rm) else rm
+            label = ru_label_from_rm(rm) if _is_rm_yyyy_mm(rm) else rm
             month_label_to_value[label] = rm
         ru_month_opts = list(month_label_to_value.keys()) or ["—"]
 
@@ -285,7 +265,7 @@ def import_edit_operations_tab():
 
                     col_l, col_r = st.columns(2)
                     with col_l:
-                        cur_month_label = (_ru_label_from_rm(obj.report_month) if _is_rm_yyyy_mm(obj.report_month or "") else (obj.report_month or "—"))
+                        cur_month_label = (ru_label_from_rm(obj.report_month) if _is_rm_yyyy_mm(obj.report_month or "") else (obj.report_month or "—"))
                         new_month_label = st.selectbox(
                             "Месяц",
                             options=ru_month_opts,
@@ -319,7 +299,7 @@ def import_edit_operations_tab():
                         try:
                             obj.report_month = (
                                 month_label_to_value.get(new_month_label)
-                                or _rm_from_ru_label(new_month_label)
+                                or rm_from_ru_label(new_month_label)
                                 or (new_month_label if new_month_label != "—" else None)
                             )
 
@@ -558,7 +538,7 @@ def import_edit_operations_tab():
 
                     col_l, col_r = st.columns(2)
                     with col_l:
-                        cur_month_label = (_ru_label_from_rm(obj.report_month) if _is_rm_yyyy_mm(obj.report_month or "") else (obj.report_month or "—"))
+                        cur_month_label = (ru_label_from_rm(obj.report_month) if _is_rm_yyyy_mm(obj.report_month or "") else (obj.report_month or "—"))
                         new_month_label = st.selectbox(
                             "Месяц",
                             options=ru_month_opts,
@@ -593,7 +573,7 @@ def import_edit_operations_tab():
                         try:
                             obj.report_month = (
                                 month_label_to_value.get(new_month_label)
-                                or _rm_from_ru_label(new_month_label)
+                                or rm_from_ru_label(new_month_label)
                                 or (new_month_label if new_month_label != "—" else None)
                             )
 
@@ -709,5 +689,3 @@ def import_edit_operations_tab():
                         session.rollback()
                         st.error(f"Ошибка: {e}")
 
-    finally:
-        session.close()

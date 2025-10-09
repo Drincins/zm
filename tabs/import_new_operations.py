@@ -46,8 +46,11 @@ def parse_file(filepath, session):
 
 def import_new_operations_tab():
     st.header("Импорт банковских выписок")
-    session = SessionLocal()
+    with SessionLocal() as session:
+        _render_import_new_operations(session)
 
+
+def _render_import_new_operations(session):
     new_files = [f for f in os.listdir(NEW_DIR) if f.lower().endswith(('.xlsx', '.csv', '.txt'))]
     st.info(f"Найдено новых файлов: **{len(new_files)}**")
     selected_files = st.multiselect("Выберите файл(ы) для предпросмотра и импорта", new_files)
@@ -187,4 +190,3 @@ def import_new_operations_tab():
         st.success(f"Импортировано новых операций: {imported_count} из {total_count}")
         st.info(f"Пропущено дубликатов (EditBank+Statement): {duplicate_count}")
 
-    session.close()

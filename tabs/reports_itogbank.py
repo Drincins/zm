@@ -203,8 +203,11 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
 
 def reports_itogbank():
     st.subheader("Итоги по компаниям")
-    session = SessionLocal()
+    with SessionLocal() as session:
+        _render_reports_itogbank(session)
 
+
+def _render_reports_itogbank(session):
     # --- КОМПАКТНАЯ ПАНЕЛЬ ФИЛЬТРОВ ---
     with st.form("itogbank_filters", border=True):
         st.markdown("### Фильтры")
@@ -330,7 +333,6 @@ def reports_itogbank():
 
     if df.empty:
         st.warning("Нет операций по выбранным условиям.")
-        session.close()
         return
 
     # ------------------------------------------------------------------
@@ -360,7 +362,6 @@ def reports_itogbank():
     options_cat = [c for c in cat_summary["Категория"].dropna().tolist()]
     if not options_cat:
         st.info("Нет категорий для детализации.")
-        session.close()
         return
 
     selected_category = st.selectbox("Категория для детализации", options=options_cat, index=0 if options_cat else 0)
@@ -595,4 +596,3 @@ def reports_itogbank():
 
     # --- Экспорт в Excel: УДАЛЁН ПО ТЗ ---
 
-    session.close()
