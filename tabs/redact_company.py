@@ -1,170 +1,155 @@
 # tabs/redact_company.py
-import streamlit as st
+import datetime as dt
 import pandas as pd
+import streamlit as st
 from sqlalchemy import update
-import datetime as dt  # + ДОБАВИТЬ
 
 from core.db import SessionLocal
 from db_models import company, up_company
 
 
-# ----------------------------- ВКЛАДКА -----------------------------
-
 def redact_company():
     with SessionLocal() as session:
-        tabs = st.tabs(["Головная компания", "Компании"])
+        tabs = st.tabs(["Управляющие компании", "Компании"])
 
-        # ========== ТАБ 1: Головная компания ==========
+        # ========== Вкладка 1: Управляющие компании ==========
         with tabs[0]:
-            st.subheader("Головные компании")
+            st.subheader("Управляющие компании")
 
-            up_list = (
-                session.query(up_company.UpCompany)
-                .order_by(up_company.UpCompany.name.asc())
-                .all()
-            )
-
-            # Таблица ГК: показываем только то, что есть в БД
-            up_list = (
-                session.query(up_company.UpCompany)
-                .order_by(up_company.UpCompany.name.asc())
-                .all()
-            )
+            ups = session.query(up_company.UpCompany).order_by(up_company.UpCompany.name.asc()).all()
 
             rows = []
-            for u in up_list:
-                rows.append({
-                    "Название": u.name,
-                    "Начальный баланс": f"{float(getattr(u, 'balance_base_amount', 0.0) or 0.0):,.2f}".replace(",", " "),
-                    "Дата изменений": (u.balance_base_date.isoformat() if getattr(u, "balance_base_date", None) else "—"),
-                    # Текущий баланс берём ТОЛЬКО из БД, если поле есть; иначе ставим «—»
-                    "Текущий баланс": (
-                        f"{float(getattr(u, 'current_balance', 0.0) or 0.0):,.2f}".replace(",", " ")
-                        if hasattr(u, "current_balance") and getattr(u, "current_balance") is not None
-                        else "—"
-                    ),
-                })
+            for u in ups:
+                rows.append(
+                    {
+                        "Название": u.name,
+                        "Базовый баланс": f"{float(getattr(u, 'balance_base_amount', 0.0) or 0.0):,.2f}".replace(",", " "),
+                        "Дата базового баланса": u.balance_base_date.isoformat() if getattr(u, "balance_base_date", None) else "",
+                        "Текущий баланс": (
+                            f"{float(getattr(u, 'current_balance', 0.0) or 0.0):,.2f}".replace(",", " ")
+                            if hasattr(u, "current_balance") and getattr(u, "current_balance") is not None
+                            else ""
+                        ),
+                    }
+                )
             df_up = pd.DataFrame(rows)
             st.dataframe(df_up, use_container_width=True, hide_index=True)
 
+            col_left, col_right = st.columns(2)
 
-            col_left, col_right = st.columns([1, 1])
-
-            # --- Попап: Редактировать/Удалить ГК ---
-            with col_left.popover("✏️ Редактировать головную компанию"):
-                if not up_list:
-                    st.info("Нет головных компаний для редактирования.")
+            # --- Редактировать/удалить УП ---
+            with col_left.popover("✏️ Редактировать управляющую компанию"):
+                if not ups:
+                    st.info("Нет доступных управляющих компаний.")
                 else:
-                    names = [u.name for u in up_list]
-                    sel_name = st.selectbox("Головная компания", options=names, index=0, key="edit_up_select")
-                    sel = next((u for u in up_list if u.name == sel_name), None)
+                    names = [u.name for u in ups]
+                    sel_name = st.selectbox("Управляющая компания", options=names, index=0, key="edit_up_select")
+                    sel = next((u for u in ups if u.name == sel_name), None)
 
                     if sel:
                         new_name = st.text_input("Новое название", value=sel.name, key="edit_up_name")
                         new_balance = st.number_input(
-                            "Баланс (₽)", value=float(getattr(sel, "balance_base_amount", 0.0) or 0.0),
-                            step=100.0, format="%.2f", key="edit_up_balance"
+                            "Базовый баланс (₽)",
+                            value=float(getattr(sel, "balance_base_amount", 0.0) or 0.0),
+                            step=100.0,
+                            format="%.2f",
+                            key="edit_up_balance",
+                        )
+                        new_date = st.date_input(
+                            "Дата базового баланса",
+                            value=getattr(sel, "balance_base_date", dt.date.today()),
+                            key="edit_up_date",
                         )
 
                         c1, c2 = st.columns(2)
 
-                        if c1.button("💾 Сохранить изменения", key="save_up_btn"):
+                        if c1.button("Сохранить", key="save_up_btn"):
                             try:
                                 sel.name = new_name.strip()
                                 sel.balance_base_amount = float(new_balance or 0.0)
+                                sel.balance_base_date = new_date
                                 session.add(sel)
                                 session.commit()
-                                st.success("Головная компания обновлена.")
+                                st.success("Управляющая компания обновлена.")
                                 st.rerun()
                             except Exception as e:
                                 session.rollback()
                                 st.error(f"Ошибка сохранения: {e}")
 
-                        # Удаление ГК с отвязкой компаний
-                        if c2.button("🗑 Удалить головную компанию", key="del_up_btn"):
+                        if c2.button("Удалить", key="del_up_btn"):
                             try:
-                                # 1) отвязать все компании этой ГК
                                 session.execute(
                                     update(company.Company)
                                     .where(company.Company.up_company_id == sel.id)
                                     .values(up_company_id=None)
                                 )
                                 session.flush()
-                                # 2) удалить саму ГК
                                 session.delete(sel)
                                 session.commit()
-                                st.success("Головная компания удалена, компании отвязаны.")
+                                st.success("Управляющая компания удалена, привязки сброшены.")
                                 st.rerun()
                             except Exception as e:
                                 session.rollback()
                                 st.error(f"Ошибка удаления: {e}")
 
-            # --- Попап: Добавить ГК ---
-            with col_right.popover("➕ Добавить головную компанию"):
+            # --- Добавить УП ---
+            with col_right.popover("➕ Добавить управляющую компанию"):
                 with st.form("form_add_up_company"):
-                    up_name = st.text_input("Название головной компании")
-                    up_balance = st.number_input("Начальный баланс (₽)", value=0.0, step=100.0, format="%.2f")
+                    up_name = st.text_input("Название управляющей компании")
+                    up_balance = st.number_input("Базовый баланс (₽)", value=0.0, step=100.0, format="%.2f")
+                    up_date = st.date_input("Дата базового баланса", value=dt.date.today())
                     submit_add = st.form_submit_button("Добавить")
                     if submit_add:
                         if not up_name.strip():
                             st.error("Название обязательно.")
                         else:
                             try:
-                                # проверка дубля
                                 exists = (
                                     session.query(up_company.UpCompany)
                                     .filter(up_company.UpCompany.name == up_name.strip())
                                     .first()
                                 )
                                 if exists:
-                                    st.warning("Такая головная компания уже существует.")
+                                    st.warning("Такая управляющая компания уже существует.")
                                 else:
                                     obj = up_company.UpCompany(
                                         name=up_name.strip(),
                                         balance_base_amount=float(up_balance or 0.0),
+                                        balance_base_date=up_date,
                                     )
                                     session.add(obj)
                                     session.commit()
-                                    st.success("Головная компания добавлена.")
+                                    st.success("Управляющая компания добавлена.")
                                     st.rerun()
                             except Exception as e:
                                 session.rollback()
                                 st.error(f"Ошибка добавления: {e}")
 
-        # ========== ТАБ 2: Компании ==========
+        # ========== Вкладка 2: Компании ==========
         with tabs[1]:
             st.subheader("Компании")
 
-            # справочник ГК
-            up_all = (
-                session.query(up_company.UpCompany)
-                .order_by(up_company.UpCompany.name.asc())
-                .all()
-            )
+            up_all = session.query(up_company.UpCompany).order_by(up_company.UpCompany.name.asc()).all()
             up_name_by_id = {u.id: u.name for u in up_all}
             up_names = [""] + [u.name for u in up_all]
 
-            # Таблица компаний: Название, ИНН, Головная
-            comp_list = (
-                session.query(company.Company)
-                .order_by(company.Company.name.asc())
-                .all()
-            )
+            comp_list = session.query(company.Company).order_by(company.Company.name.asc()).all()
             df_comp = pd.DataFrame(
                 [
                     {
                         "Название": c.name,
                         "ИНН": c.inn,
-                        "Головная компания": up_name_by_id.get(c.up_company_id, ""),
+                        "Управляющая": up_name_by_id.get(c.up_company_id, ""),
+                        "Основная": "Да" if getattr(c, "is_primary", False) else "",
                     }
                     for c in comp_list
                 ]
             )
             st.dataframe(df_comp, use_container_width=True, hide_index=True)
 
-            cL, cR = st.columns([1, 1])
+            cL, cR = st.columns(2)
 
-            # --- Попап: Редактировать/Удалить компанию ---
+            # --- Редактировать/удалить компанию ---
             with cL.popover("✏️ Редактировать компанию"):
                 if not comp_list:
                     st.info("Нет компаний для редактирования.")
@@ -178,20 +163,24 @@ def redact_company():
                         new_c_inn = st.text_input("ИНН", value=sel_c.inn or "", key="edit_comp_inn")
                         cur_up_name = up_name_by_id.get(sel_c.up_company_id, "")
                         new_up_name = st.selectbox(
-                            "Головная компания", options=up_names,
+                            "Управляющая компания",
+                            options=up_names,
                             index=(up_names.index(cur_up_name) if cur_up_name in up_names else 0),
-                            key="edit_comp_up"
+                            key="edit_comp_up",
+                        )
+                        new_primary = st.checkbox(
+                            "Основная по умолчанию", value=bool(getattr(sel_c, "is_primary", False)), key="edit_comp_primary"
                         )
 
                         b1, b2 = st.columns(2)
 
-                        if b1.button("💾 Сохранить", key="save_comp_btn"):
+                        if b1.button("Сохранить", key="save_comp_btn"):
                             try:
                                 sel_c.name = new_c_name.strip()
                                 sel_c.inn = (new_c_inn or "").strip()
-                                # привязка к ГК
                                 uc = next((u for u in up_all if u.name == new_up_name), None) if new_up_name else None
                                 sel_c.up_company_id = uc.id if uc else None
+                                sel_c.is_primary = bool(new_primary)
                                 session.add(sel_c)
                                 session.commit()
                                 st.success("Компания обновлена.")
@@ -200,7 +189,7 @@ def redact_company():
                                 session.rollback()
                                 st.error(f"Ошибка сохранения: {e}")
 
-                        if b2.button("🗑 Удалить компанию", key="del_comp_btn"):
+                        if b2.button("Удалить", key="del_comp_btn"):
                             try:
                                 session.delete(sel_c)
                                 session.commit()
@@ -210,12 +199,13 @@ def redact_company():
                                 session.rollback()
                                 st.error(f"Ошибка удаления: {e}")
 
-            # --- Попап: Добавить компанию ---
+            # --- Добавить компанию ---
             with cR.popover("➕ Добавить компанию"):
                 with st.form("form_add_company"):
                     c_name = st.text_input("Название компании")
                     c_inn = st.text_input("ИНН")
-                    c_up_name = st.selectbox("Головная компания", options=up_names, index=0)
+                    c_up_name = st.selectbox("Управляющая компания", options=up_names, index=0)
+                    c_primary = st.checkbox("Основная по умолчанию", value=False, key="add_comp_primary")
                     submit_c = st.form_submit_button("Добавить")
                     if submit_c:
                         if not c_name.strip():
@@ -229,6 +219,7 @@ def redact_company():
                                     name=c_name.strip(),
                                     inn=c_inn.strip(),
                                     up_company_id=(uc.id if uc else None),
+                                    is_primary=bool(c_primary),
                                 )
                                 session.add(obj)
                                 session.commit()
@@ -237,4 +228,3 @@ def redact_company():
                             except Exception as e:
                                 session.rollback()
                                 st.error(f"Ошибка добавления: {e}")
-

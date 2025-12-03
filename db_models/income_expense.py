@@ -33,5 +33,5 @@ class IncomeExpense(Base):
 
 
     __table_args__ = (
-        CheckConstraint("operation_type in ('списание','поступление')", name="ck_income_expense_operation_type"),
+        CheckConstraint("lower(operation_type) in ('списание','поступление')", name="ck_income_expense_operation_type"),
     )

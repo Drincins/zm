@@ -56,3 +56,20 @@ def rm_from_ru_label(label: str) -> Optional[str]:
     except (ValueError, IndexError):
         return None
     return f"{year_int:04d}-{month_index:02d}"
+
+
+def looks_like_report_month(value: Optional[str]) -> bool:
+    """Проверяет, что строка похожа на 'YYYY-MM'."""
+    if not value or len(value) != 7 or value[4] != '-':
+        return False
+    year, month = value.split('-', 1)
+    return year.isdigit() and month.isdigit()
+
+
+
+def format_report_month_label(value: Optional[str]) -> str:
+    """Возвращает строку месяца в виде 'Месяц YYYY' (или исходное значение)."""
+    if not value:
+        return ''
+    return ru_label_from_rm(value) if looks_like_report_month(value) else value
+

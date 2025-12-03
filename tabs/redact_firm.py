@@ -61,9 +61,6 @@ def redact_firm():
             if cat_filter:
                 df = df[df["Категория"].isin(cat_filter)]
 
-        # ---- Таблица предпросмотра (без id, без индекса)
-        view_df = df.drop(columns=["id"]) if "id" in df.columns else df
-        st.dataframe(view_df, use_container_width=True, hide_index=True)
         # ---- Сортировка и вывод таблицы (без id, без индекса)
         if not df.empty:
             df = df.sort_values(by=sort_col, ascending=not sort_desc, kind="mergesort")

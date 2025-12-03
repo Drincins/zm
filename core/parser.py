@@ -94,6 +94,9 @@ def parse_bank_statement_to_df(
         df = parse_1c_client_bank(filepath)
     else:
         raise ValueError("Формат файла не поддерживается (только .csv, .xlsx, .txt)")
+    if not len(df.columns):
+        return pd.DataFrame(), []
+
 
     # Срезаем служебные строки из 1С
     remove_prefixes = ["1CClientBankExchange", "ВерсияФормата", "СекцияРасчСчет", "СекцияДокумент"]
@@ -263,12 +266,12 @@ def parse_bank_statement_to_df(
         rowid = f"{date_str}|{doc_number}|{amount:.2f}|{payer_inn_clean}|{receiver_inn_clean}"
         df.at[idx, "row_id"] = rowid
 
-        # --- report_month: русское название месяца из даты платежа (без года) ---
+        # --- report_month: YYYY-MM по дате платежа ---
         if not str(row.get("report_month", "")).strip():
             try:
                 dt_full = pd.to_datetime(row.get("date", ""), dayfirst=True, errors="coerce")
                 if not pd.isna(dt_full):
-                    df.at[idx, "report_month"] = RUS_MONTHS.get(dt_full.month, "")
+                    df.at[idx, "report_month"] = f"{dt_full.year:04d}-{dt_full.month:02d}"
                 else:
                     df.at[idx, "report_month"] = ""
             except Exception:

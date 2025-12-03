@@ -1,9 +1,9 @@
-# tabs/redact_statement.py
+﻿# tabs/redact_statement.py
 from datetime import datetime
 import streamlit as st
 import pandas as pd
 from core.db import SessionLocal
-from core.months import ru_label_from_rm, rm_from_ru_label
+from core.months import format_report_month_label, ru_label_from_rm, rm_from_ru_label
 from db_models import statement, company, up_company, category, group, firm
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from io import BytesIO  # для формирования XLSX в памяти
@@ -49,7 +49,7 @@ def redact_statement():
                 "id": s.id,
                 "row_id": rid,
                 "Дата": s.date.strftime('%d.%m.%Y') if s.date else "—",
-                "Месяц": s.report_month or "—",
+                "Месяц": format_report_month_label(s.report_month) or "—",
                 # Компания -> Фирма -> сырой текст
                 "Плательщик": (
                     company_dict.get(s.payer_company_id)
@@ -439,7 +439,7 @@ def redact_statement():
                         )
 
                         new_type = st.selectbox(
-                            "Тип операции", options=["списание", "поступление"],
+                            "Тип операции", options=["Списание", "Поступление"],
                             index=(0 if (obj.operation_type or '').strip().lower() == "списание" else 1),
                             key="edit_op_type"
                         )
@@ -722,3 +722,4 @@ def redact_statement():
                 except Exception as e:
                     session.rollback()
                     st.error(f"Ошибка при сохранении: {e}")
+

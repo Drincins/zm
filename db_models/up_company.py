@@ -9,4 +9,9 @@ class UpCompany(Base):
     name = Column(String, unique=True, nullable=False)
     companies = relationship("Company", back_populates="up_company")
     balance_base_amount = Column(Float, nullable=False, default=0.0)  # зафиксированная база баланса
-    balance_base_date   = Column(Date, nullable=True)      
+    balance_base_date   = Column(Date, nullable=True)
+    restaurant_payment_methods = relationship(
+        "RestaurantPaymentMethod",
+        back_populates="up_company",
+        cascade="all,delete-orphan",
+    )

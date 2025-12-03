@@ -1,10 +1,11 @@
-# tabs/reports_itogbank.py
+﻿# tabs/reports_itogbank.py
 import os
 from datetime import datetime
 import pandas as pd
 import streamlit as st
 from sqlalchemy import or_
 from core.utils import normalize_amount_by_type
+from core.months import format_report_month_label
 
 from core.db import SessionLocal
 from db_models import (
@@ -117,7 +118,7 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         "id": r.id,
         "row_id": r.row_id,
         "Дата": r.date,
-        "Месяц": r.report_month,
+        "Месяц": format_report_month_label(r.report_month),
         "Назначение": r.purpose,
         "Сумма": r.amount,
         "Тип": r.operation_type,
@@ -140,7 +141,9 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
 
     df["Дата"] = pd.to_datetime(df["Дата"])
     df["Сумма"] = pd.to_numeric(df["Сумма"], errors="coerce").fillna(0.0)
-    df["Тип"] = df["Тип"].astype(str).str.strip().str.lower()
+    df["_op_type_norm"] = df["Тип"].astype(str).str.strip().str.lower()
+    type_display_map = {"списание": "Списание", "поступление": "Поступление"}
+    df["Тип"] = df["_op_type_norm"].map(type_display_map).fillna(df["Тип"])
     for col in ["Группа", "Категория"]:
         if col in df.columns:
             df[col] = df[col].astype("string").str.strip()
@@ -209,6 +212,7 @@ def reports_itogbank():
 
 def _render_reports_itogbank(session):
     # --- КОМПАКТНАЯ ПАНЕЛЬ ФИЛЬТРОВ ---
+    selected_type_norms: list[str] = []
     with st.form("itogbank_filters", border=True):
         st.markdown("### Фильтры")
 
@@ -264,7 +268,12 @@ def _render_reports_itogbank(session):
 
         # 3) Учётный месяц(ы)
         months = _distinct_report_months(session, company_ids, up_selected_id)
-        sel_months = st.multiselect("Учётный месяц(ы)", options=months, default=(months[:1] if months else []))
+        sel_months = st.multiselect(
+            "Выберите месяц(ы)",
+            options=months,
+            default=(months[:1] if months else []),
+            format_func=format_report_month_label,
+        )
 
         # 4) Частые фильтры — в две колонки
         c3, c4 = st.columns([1, 1])
@@ -276,12 +285,14 @@ def _render_reports_itogbank(session):
             key="itog_recorded_filter"  # уникальный ключ
         )
 
+        op_type_options = ["Списание", "Поступление"]
         op_types = c4.multiselect(
             "Тип операции",
-            ["списание", "поступление"],
-            default=["списание", "поступление"],
+            op_type_options,
+            default=op_type_options,
             key="itog_op_types"  # уникальный ключ
         )
+        selected_type_norms = [opt.lower() for opt in op_types] if op_types else []
 
         # 5) Редкие фильтры — под экспандер
         with st.expander("Доп. фильтры"):
@@ -339,7 +350,10 @@ def _render_reports_itogbank(session):
     # ИТОГИ ПО КАТЕГОРИЯМ (вместо итогов по группам) + операции категории
     # ------------------------------------------------------------------
     st.markdown("### Итог по категориям")
-    df_types = df[df["Тип"].isin(op_types)].copy()
+    if selected_type_norms:
+        df_types = df[df["_op_type_norm"].isin(selected_type_norms)].copy()
+    else:
+        df_types = df.copy()
 
     cat_summary = (
         df_types.groupby("Категория", dropna=False, as_index=False)["Сумма"]
@@ -390,6 +404,7 @@ def _render_reports_itogbank(session):
         }
 
         disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
+        disp_df["Записано"] = disp_df["Записано"].apply(lambda v: "✅" if bool(v) else "")
 
         disp_df["Дата"] = pd.to_datetime(disp_df["Дата"], errors="coerce").dt.strftime("%Y-%m-%d")
         st.dataframe(disp_df.drop(columns=["id"]), use_container_width=True, hide_index=True)
@@ -435,8 +450,12 @@ def _render_reports_itogbank(session):
 
             # Поля формы
             new_month = st.text_input("Месяц", value=cur_month, placeholder="YYYY-MM")
-            new_type = st.selectbox("Тип операции", options=["списание", "поступление"],
-                                    index=(0 if cur_type == "списание" else 1))
+            type_options = ["Списание", "Поступление"]
+            new_type = st.selectbox(
+                "Тип операции",
+                options=type_options,
+                index=(0 if cur_type == "списание" else 1),
+            )
             # За кого платили (UpCompany)
             up_names = [u.name for u in up_companies]
             sel_zk_name = st.selectbox(
@@ -595,4 +614,5 @@ def _render_reports_itogbank(session):
 
 
     # --- Экспорт в Excel: УДАЛЁН ПО ТЗ ---
+
 
