@@ -12,6 +12,7 @@ class Statement(Base):
     row_id = Column(String, unique=True, index=True, nullable=False)
     date = Column(Date, nullable=False)
     report_month = Column(String)  # месяц, к которому относится операция
+    report_year = Column(Integer, nullable=True)  # год учётного месяца
     doc_number = Column(String)
     payer_inn = Column(String, comment="ИНН плательщика из выписки")
     receiver_inn = Column(String, comment="ИНН получателя из выписки")

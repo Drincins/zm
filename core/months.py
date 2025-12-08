@@ -22,6 +22,7 @@ RU_MONTHS = [
 
 # Словарь для быстрого доступа по индексу (1..12).
 RU_MONTHS_MAP = {idx + 1: name for idx, name in enumerate(RU_MONTHS)}
+RU_MONTH_NAME_TO_INDEX = {name: idx + 1 for idx, name in enumerate(RU_MONTHS)}
 
 
 def ru_month_name(month_number: int) -> str:
@@ -72,4 +73,19 @@ def format_report_month_label(value: Optional[str]) -> str:
     if not value:
         return ''
     return ru_label_from_rm(value) if looks_like_report_month(value) else value
+
+
+def format_month_year(month_name: Optional[str], year: Optional[int]) -> str:
+    """Форматирует пару (месяц-словом, год) в вид 'Месяц YYYY'."""
+    if not month_name:
+        return ''
+    return f"{month_name} {year}" if year else month_name
+
+
+def month_name_from_date(d) -> Optional[str]:
+    """Возвращает русское название месяца по объекту date/datetime."""
+    try:
+        return ru_month_name(d.month)
+    except Exception:
+        return None
 

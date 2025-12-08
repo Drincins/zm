@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import or_
 from core.utils import normalize_amount_by_type
-from core.months import format_report_month_label
+from core.months import format_report_month_label, format_month_year
 
 from core.db import SessionLocal
 from db_models import (
@@ -71,13 +71,29 @@ def _distinct_report_months(session, company_ids: list[int] | None, up_company_i
     months = [row[0] for row in q.all() if row and row[0]]
     return sorted(set(months), reverse=True)
 
-def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None, report_months: list[str]) -> pd.DataFrame:
+
+def _distinct_report_years(session, company_ids: list[int] | None, up_company_id: int | None) -> list[int]:
+    q = session.query(m_statement.Statement.report_year).distinct()
+    if company_ids:
+        q = q.filter(
+            or_(
+                m_statement.Statement.payer_company_id.in_(company_ids),
+                m_statement.Statement.receiver_company_id.in_(company_ids),
+            )
+        )
+    elif up_company_id:
+        q = q.filter(m_statement.Statement.up_company_id == up_company_id)
+    years = [row[0] for row in q.all() if row and row[0] is not None]
+    return sorted(set(int(y) for y in years))
+
+def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None, report_months: list[str], report_years: list[int] | None) -> pd.DataFrame:
     q = (
         session.query(
             m_statement.Statement.id.label("id"),
             m_statement.Statement.row_id.label("row_id"),
             m_statement.Statement.date.label("date"),
             m_statement.Statement.report_month.label("report_month"),
+            m_statement.Statement.report_year.label("report_year"),
             m_statement.Statement.purpose.label("purpose"),
             m_statement.Statement.amount.label("amount"),
             m_statement.Statement.operation_type.label("operation_type"),
@@ -100,6 +116,9 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         .filter(m_statement.Statement.report_month.in_(report_months))
     )
 
+    if report_years:
+        q = q.filter(m_statement.Statement.report_year.in_(report_years))
+
     if company_ids:
         q = q.filter(
             or_(
@@ -118,7 +137,7 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         "id": r.id,
         "row_id": r.row_id,
         "Дата": r.date,
-        "Месяц": format_report_month_label(r.report_month),
+        "Месяц": r.report_month or "",
         "Назначение": r.purpose,
         "Сумма": r.amount,
         "Тип": r.operation_type,
@@ -139,7 +158,7 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
     if df.empty:
         return df
 
-    df["Дата"] = pd.to_datetime(df["Дата"])
+    df["Дата"] = pd.to_datetime(df["Дата"], dayfirst=True).dt.strftime("%d.%m.%Y")
     df["Сумма"] = pd.to_numeric(df["Сумма"], errors="coerce").fillna(0.0)
     df["_op_type_norm"] = df["Тип"].astype(str).str.strip().str.lower()
     type_display_map = {"списание": "Списание", "поступление": "Поступление"}
@@ -266,13 +285,20 @@ def _render_reports_itogbank(session):
                 company_obj = next((c for c in companies_fact if c.name == choice), None)
                 company_ids = [company_obj.id] if company_obj else None
 
-        # 3) Учётный месяц(ы)
+        # 3) Учётный месяц(ы) и год(ы)
         months = _distinct_report_months(session, company_ids, up_selected_id)
-        sel_months = st.multiselect(
-            "Выберите месяц(ы)",
+        years = _distinct_report_years(session, company_ids, up_selected_id)
+        col_m, col_y = st.columns(2)
+        sel_months = col_m.multiselect(
+            "Месяц",
             options=months,
             default=(months[:1] if months else []),
-            format_func=format_report_month_label,
+            format_func=lambda m: m,
+        )
+        sel_years = col_y.multiselect(
+            "Год",
+            options=years,
+            default=years if years else [],
         )
 
         # 4) Частые фильтры — в две колонки
@@ -315,7 +341,7 @@ def _render_reports_itogbank(session):
 
     # --- Данные ---
     with st.spinner("Загружаем операции..."):
-        df = _fetch_df(session, company_ids, up_selected_id, sel_months)
+        df = _fetch_df(session, company_ids, up_selected_id, sel_months, sel_years)
 
     # Фильтр «Оплата за других»
     if only_for_others and not df.empty:
@@ -368,7 +394,7 @@ def _render_reports_itogbank(session):
         [show_cat, pd.DataFrame([{"Категория": "ИТОГО", "Сумма": _fmt_rub(total_cat)}])],
         ignore_index=True
     )
-    st.dataframe(show_cat, use_container_width=True, hide_index=True)
+    st.dataframe(show_cat, width="stretch", hide_index=True)
 
     # --- Drill-down: Категория → Операции + редактор ---
     st.markdown("#### Операции выбранной категории")
@@ -406,15 +432,22 @@ def _render_reports_itogbank(session):
         disp_df = pd.concat([disp_df, pd.DataFrame([total_row])], ignore_index=True)
         disp_df["Записано"] = disp_df["Записано"].apply(lambda v: "✅" if bool(v) else "")
 
-        disp_df["Дата"] = pd.to_datetime(disp_df["Дата"], errors="coerce").dt.strftime("%Y-%m-%d")
-        st.dataframe(disp_df.drop(columns=["id"]), use_container_width=True, hide_index=True)
+        disp_df["Дата"] = pd.to_datetime(disp_df["Дата"], errors="coerce", dayfirst=True).dt.strftime("%d.%m.%Y")
+        st.dataframe(disp_df.drop(columns=["id"]), width="stretch", hide_index=True)
 
         # --- Выбор операции для редактирования ---
-        options_ops = [
-            (int(row["id"]),
-             f'{pd.to_datetime(row["Дата"]).date()} • {str(row["Назначение"])[:60]} • {_fmt_rub(row["Сумма"])}')
-            for _, row in view_df.iterrows()
-        ]
+        options_ops = []
+        for _, row in view_df.iterrows():
+            try:
+                rid = int(row["id"])
+            except Exception:
+                continue
+            date_str = pd.to_datetime(row["Дата"], errors="coerce", dayfirst=True)
+            if pd.isna(date_str):
+                date_disp = ""
+            else:
+                date_disp = date_str.strftime("%d.%m.%Y")
+            options_ops.append((rid, f'{date_disp} • {str(row["Назначение"])[:60]} • {_fmt_rub(row["Сумма"])}'))
         selected_id = st.selectbox(
             "Выберите операцию для редактирования",
             options=[o[0] for o in options_ops],
@@ -614,5 +647,6 @@ def _render_reports_itogbank(session):
 
 
     # --- Экспорт в Excel: УДАЛЁН ПО ТЗ ---
+
 
 

@@ -11,6 +11,7 @@ class PaymentMethod(Base):
     name = Column(String(100), nullable=False)
     description = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    participates_in_daily = Column(Boolean, nullable=False, default=True, comment="Участвует в дневном учёте")
 
     expenses = relationship("RestaurantExpense", back_populates="payment_method")
     company_links = relationship(

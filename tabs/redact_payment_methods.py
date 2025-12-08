@@ -40,6 +40,7 @@ def _render_methods_list(methods):
                 "Название": pm.name,
                 "Описание": pm.description or "",
                 "Активен": "✅" if pm.is_active else "",
+                "Участвует в дневном учёте": "✅" if getattr(pm, "participates_in_daily", True) else "",
                 "Компании": ", ".join(company_names) if company_names else "—",
             }
         )
@@ -92,6 +93,7 @@ def _add_method_form(session, companies):
         name = st.text_input("Название", key="pm_add_name")
         description = st.text_area("Описание", key="pm_add_desc", height=60)
         is_active = st.checkbox("Активен", value=True, key="pm_add_active")
+        participates = st.checkbox("Участвует в дневном учёте", value=True, key="pm_add_daily")
         company_options = {c.name: c.id for c in companies}
         selected_company_names = st.multiselect("Привязать к компаниям", options=list(company_options.keys()), key="pm_add_companies")
 
@@ -119,6 +121,7 @@ def _add_method_form(session, companies):
                 name=name.strip(),
                 description=description or None,
                 is_active=is_active,
+                participates_in_daily=participates,
             )
             session.add(pm_obj)
             session.flush()
@@ -175,6 +178,11 @@ def _edit_method_form(session, pm_obj: m_pm.PaymentMethod, companies):
         name = st.text_input("Название", value=pm_obj.name, key=f"pm_edit_name_{pm_obj.id}")
         description = st.text_area("Описание", value=pm_obj.description or "", height=60, key=f"pm_edit_desc_{pm_obj.id}")
         is_active = st.checkbox("Активен", value=bool(pm_obj.is_active), key=f"pm_edit_active_{pm_obj.id}")
+        participates = st.checkbox(
+            "Участвует в дневном учёте",
+            value=bool(getattr(pm_obj, "participates_in_daily", True)),
+            key=f"pm_edit_daily_{pm_obj.id}",
+        )
         selected_company_names = st.multiselect(
             "Привязать к компаниям",
             options=list(company_options.keys()),
@@ -225,6 +233,7 @@ def _edit_method_form(session, pm_obj: m_pm.PaymentMethod, companies):
             pm_obj.name = name.strip()
             pm_obj.description = description or None
             pm_obj.is_active = is_active
+            pm_obj.participates_in_daily = participates
 
             selected_ids = {company_options[n] for n in selected_company_names}
             default_id = company_options.get(default_company_name) if default_company_name != "— нет —" else None

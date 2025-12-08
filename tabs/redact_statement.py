@@ -3,7 +3,7 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 from core.db import SessionLocal
-from core.months import format_report_month_label, ru_label_from_rm, rm_from_ru_label
+from core.months import format_report_month_label, ru_label_from_rm, rm_from_ru_label, format_month_year
 from db_models import statement, company, up_company, category, group, firm
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from io import BytesIO  # для формирования XLSX в памяти
@@ -41,6 +41,7 @@ def redact_statement():
         # ----------------------------- Данные -----------------------------
         stmts = session.query(statement.Statement).all()
         all_report_months = sorted({s.report_month for s in stmts if s.report_month})
+        all_report_years = sorted({s.report_year for s in stmts if getattr(s, "report_year", None) is not None})
         all_operation_types = sorted({(s.operation_type or "").strip() for s in stmts if s.operation_type})
         rows = []
         for s in stmts:
@@ -49,7 +50,8 @@ def redact_statement():
                 "id": s.id,
                 "row_id": rid,
                 "Дата": s.date.strftime('%d.%m.%Y') if s.date else "—",
-                "Месяц": format_report_month_label(s.report_month) or "—",
+                "Месяц": s.report_month or "—",
+                "Год": getattr(s, "report_year", None) or "—",
                 # Компания -> Фирма -> сырой текст
                 "Плательщик": (
                     company_dict.get(s.payer_company_id)
@@ -89,70 +91,102 @@ def redact_statement():
 
         # ----------------------------- Фильтры -----------------------------
         st.markdown("### Фильтры")
-        # Инициализация session_state под фильтры (сохраняем выбор)
-        for key in ["up_company", "company", "month", "payer", "receiver", "group", "category", "op_type", "za_kogo"]:
-            st.session_state.setdefault(f"flt_{key}", [])
 
-        def dyn_multiselect(label, column, df_local, key):
-            options = sorted([x for x in df_local[column].dropna().unique().tolist()]) if column in df_local else []
-            default = [val for val in st.session_state.get(key, []) if val in options]
-            return st.multiselect(label, options, default=default, key=key)
+        # Храним выбор в session_state
+        st.session_state.setdefault("stmt_filters", {
+            "up_company": [],
+            "company": [],
+            "month": [],
+            "year": [],
+            "payer": [],
+            "receiver": [],
+            "group": [],
+            "category": [],
+            "op_type": [],
+            "za_kogo": [],
+            "recorded": "Все",
+        })
 
+        fstate = st.session_state["stmt_filters"]
+
+        def opts(column):
+            return sorted([x for x in df[column].dropna().unique().tolist()]) if column in df else []
+
+        with st.form("stmt_filters_form", clear_on_submit=False, border=True):
+            col_up, col_month, col_party = st.columns([1.2, 1.2, 1.6])
+            with col_up:
+                sel_up = st.multiselect("Головная компания", options=opts("Головная компания"), default=fstate.get("up_company", []))
+                sel_company = st.multiselect("Компания (плательщик/получатель)", options=opts("Плательщик"), default=fstate.get("company", []))
+            with col_month:
+                sel_month = st.multiselect("Месяц", options=opts("Месяц"), default=fstate.get("month", []))
+                sel_year = st.multiselect("Год", options=opts("Год"), default=fstate.get("year", []))
+                sel_recorded = st.selectbox(
+                    "Записано",
+                    options=["Все", "Только новые (не записанные)", "Только записанные"],
+                    index=["Все", "Только новые (не записанные)", "Только записанные"].index(fstate.get("recorded", "Все")),
+                )
+            with col_party:
+                sel_payer = st.multiselect("Плательщик", options=opts("Плательщик"), default=fstate.get("payer", []))
+                sel_receiver = st.multiselect("Получатель", options=opts("Получатель"), default=fstate.get("receiver", []))
+                sel_za_kogo = st.multiselect("За кого платили", options=opts("За кого платили"), default=fstate.get("za_kogo", []))
+
+            col_cat, col_misc = st.columns([1.3, 1.3])
+            with col_cat:
+                sel_group = st.multiselect("Группа", options=opts("Группа (название)"), default=fstate.get("group", []))
+                sel_category = st.multiselect("Категория", options=opts("Категория (название)"), default=fstate.get("category", []))
+            with col_misc:
+                sel_op_type = st.multiselect("Тип операции", options=opts("Тип операции"), default=fstate.get("op_type", []))
+
+            submitted_filters = st.form_submit_button("Применить", type="primary")
+
+        if submitted_filters:
+            st.session_state["stmt_filters"] = {
+                "up_company": sel_up,
+                "company": sel_company,
+                "month": sel_month,
+                "year": sel_year,
+                "payer": sel_payer,
+                "receiver": sel_receiver,
+                "group": sel_group,
+                "category": sel_category,
+                "op_type": sel_op_type,
+                "za_kogo": sel_za_kogo,
+                "recorded": sel_recorded,
+            }
+            st.session_state["stmt_filters_applied"] = True
+
+        if not st.session_state.get("stmt_filters_applied"):
+            st.info("Настройте фильтры и нажмите «Применить», чтобы увидеть таблицу.")
+            return
+
+        fstate = st.session_state["stmt_filters"]
         current_df = df.copy()
-        cols = st.columns(4)
-        with cols[0]:
-            up_company_vals = dyn_multiselect("Головная компания", "Головная компания", current_df, "flt_up_company")
-            if up_company_vals:
-                current_df = current_df[current_df["Головная компания"].isin(up_company_vals)]
+        if fstate.get("up_company"):
+            current_df = current_df[current_df["Головная компания"].isin(fstate["up_company"])]
+        if fstate.get("company"):
+            mask = (current_df["Плательщик"].isin(fstate["company"])) | (current_df["Получатель"].isin(fstate["company"]))
+            current_df = current_df[mask]
+        if fstate.get("month"):
+            current_df = current_df[current_df["Месяц"].isin(fstate["month"])]
+        if fstate.get("year"):
+            current_df = current_df[current_df["Год"].isin(fstate["year"])]
+        if fstate.get("payer"):
+            current_df = current_df[current_df["Плательщик"].isin(fstate["payer"])]
+        if fstate.get("receiver"):
+            current_df = current_df[current_df["Получатель"].isin(fstate["receiver"])]
+        if fstate.get("group"):
+            current_df = current_df[current_df["Группа (название)"].isin(fstate["group"])]
+        if fstate.get("category"):
+            current_df = current_df[current_df["Категория (название)"].isin(fstate["category"])]
+        if fstate.get("op_type"):
+            current_df = current_df[current_df["Тип операции"].isin(fstate["op_type"])]
+        if fstate.get("za_kogo"):
+            current_df = current_df[current_df["За кого платили"].isin(fstate["za_kogo"])]
 
-            pay = current_df[["Плательщик"]].copy()
-            rec = current_df[["Получатель"]].copy()
-            rec.columns = ["Плательщик"]
-            df_both = pd.concat([pay, rec], axis=0, ignore_index=True)
-            company_vals = dyn_multiselect("Компания (Плательщик/Получатель)", "Плательщик", df_both, "flt_company")
-            if company_vals:
-                mask = (current_df["Плательщик"].isin(company_vals)) | (current_df["Получатель"].isin(company_vals))
-                current_df = current_df[mask]
-
-        with cols[1]:
-            month_vals = dyn_multiselect("Месяц", "Месяц", current_df, "flt_month")
-            if month_vals:
-                current_df = current_df[current_df["Месяц"].isin(month_vals)]
-            payer_vals = dyn_multiselect("Плательщик", "Плательщик", current_df, "flt_payer")
-            if payer_vals:
-                current_df = current_df[current_df["Плательщик"].isin(payer_vals)]
-
-        with cols[2]:
-            receiver_vals = dyn_multiselect("Получатель", "Получатель", current_df, "flt_receiver")
-            if receiver_vals:
-                current_df = current_df[current_df["Получатель"].isin(receiver_vals)]
-            group_vals = dyn_multiselect("Группа", "Группа (название)", current_df, "flt_group")
-            if group_vals:
-                current_df = current_df[current_df["Группа (название)"].isin(group_vals)]
-
-        with cols[3]:
-            category_vals = dyn_multiselect("Категория", "Категория (название)", current_df, "flt_category")
-            if category_vals:
-                current_df = current_df[current_df["Категория (название)"].isin(category_vals)]
-            op_type_vals = dyn_multiselect("Тип операции", "Тип операции", current_df, "flt_op_type")
-            if op_type_vals:
-                current_df = current_df[current_df["Тип операции"].isin(op_type_vals)]
-
-        # Фильтр «За кого платили»
-        za_kogo_vals = dyn_multiselect("За кого платили", "За кого платили", current_df, "flt_za_kogo")
-        if za_kogo_vals:
-            current_df = current_df[current_df["За кого платили"].isin(za_kogo_vals)]
-
-        # Фильтр «Записано»
-        recorded_filter = st.selectbox(
-            "Записано",
-            options=["Все", "Только новые (не записанные)", "Только записанные"],
-            index=0,
-            key="flt_recorded",
-        )
-        if recorded_filter == "Только новые (не записанные)":
+        rec_filter = fstate.get("recorded", "Все")
+        if rec_filter == "Только новые (не записанные)":
             current_df = current_df[current_df["Записано"] == False]
-        elif recorded_filter == "Только записанные":
+        elif rec_filter == "Только записанные":
             current_df = current_df[current_df["Записано"] == True]
 
         df_filtered = current_df.reset_index(drop=True)
@@ -255,7 +289,7 @@ def redact_statement():
             allow_unsafe_jscode=True,
             theme="streamlit",
             height=700,
-            use_container_width=True,
+            width="stretch",
             fit_columns_on_grid_load=True,
             key="statement_table",  # постоянный ключ — состояние сохраняем вручную
         )
@@ -302,7 +336,7 @@ def redact_statement():
         # Записать (recorded=True) выбранные
         with c_rec:
             btn_caption = f"✅ Записать выделенные ({len(selected_ids)})" if selected_ids else "✅ Записать выделенные"
-            if st.button(btn_caption, use_container_width=True):
+            if st.button(btn_caption, width="stretch"):
                 if not selected_ids:
                     st.warning("Не выбрано ни одной строки.")
                 else:
@@ -322,7 +356,7 @@ def redact_statement():
             confirm_key = "stmt_bulk_delete_confirm"
             confirm_delete = st.checkbox("Подтверждаю удаление", key=confirm_key)
             delete_disabled = len(selected_ids) == 0
-            if st.button("🗑 Удалить выбранные", use_container_width=True, disabled=delete_disabled):
+            if st.button("🗑 Удалить выбранные", width="stretch", disabled=delete_disabled):
                 if not selected_ids:
                     st.warning("Не выбрано ни одной строки.")
                 elif not confirm_delete:
@@ -348,7 +382,7 @@ def redact_statement():
 
                 # Приведём дату к ISO, сумму — к числу
                 if "Дата" in export_df.columns:
-                    export_df["Дата"] = pd.to_datetime(export_df["Дата"], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
+                    export_df["Дата"] = pd.to_datetime(export_df["Дата"], dayfirst=True, errors="coerce").dt.strftime("%d.%m.%Y")
                 if "Сумма" in export_df.columns:
                     export_df["Сумма"] = pd.to_numeric(export_df["Сумма"], errors="coerce").fillna(0.0)
 
@@ -377,7 +411,7 @@ def redact_statement():
                     data=bio.getvalue(),
                     file_name=f'statement_selected_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    width="stretch",
                     key="stmt_export_selected_xlsx"
                 )
             else:
@@ -486,7 +520,7 @@ def redact_statement():
                     new_purpose = st.text_input("Назначение", value=(obj.purpose or ""), key="edit_purpose")
                     new_comment = st.text_area("Комментарий", value=(obj.comment or ""), height=120, key="edit_comment")
 
-                    if st.button("💾 Сохранить изменения по операции", use_container_width=True, key="btn_save_edit_stmt"):
+                    if st.button("💾 Сохранить изменения по операции", width="stretch", key="btn_save_edit_stmt"):
                         try:
                             obj.report_month = (
                                 month_label_to_value.get(new_month_label)
@@ -539,7 +573,7 @@ def redact_statement():
                         want_delete = st.toggle("Подтвердить удаление", key="stmt_delete_confirm")
                     with col_del2:
                         if st.button("🗑️ Удалить операцию", type="primary", disabled=not want_delete,
-                                     key="btn_delete_stmt", use_container_width=True):
+                                     key="btn_delete_stmt", width="stretch"):
                             try:
                                 session.delete(obj)
                                 session.commit()
@@ -634,7 +668,7 @@ def redact_statement():
             elif bulk_field == "Тип операции":
                 can_apply = bool(selected_ids and target_operation_type)
 
-            if st.button("🔧 Применить к выбранным", use_container_width=True, disabled=not can_apply, key="btn_bulk_apply"):
+            if st.button("🔧 Применить к выбранным", width="stretch", disabled=not can_apply, key="btn_bulk_apply"):
                 if not selected_ids:
                     st.warning("Не выбрано ни одной строки.")
                 elif bulk_field == "Категория" and not target_category:
@@ -722,4 +756,5 @@ def redact_statement():
                 except Exception as e:
                     session.rollback()
                     st.error(f"Ошибка при сохранении: {e}")
+
 

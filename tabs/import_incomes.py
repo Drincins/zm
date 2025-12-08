@@ -14,6 +14,7 @@ from core.db import SessionLocal
 from core.months import ru_label_from_rm
 from db_models import income_format as m_if
 from db_models import restaurant_expense as m_re
+from db_models import payment_method as m_pm
 from db_models import up_company as m_up
 from db_models import company as m_company
 from db_models import group as m_group
@@ -560,9 +561,12 @@ def _get_restaurant_expenses(
             m_re.RestaurantExpense.date,
             func.coalesce(func.sum(m_re.RestaurantExpense.amount), 0),
         )
+        .outerjoin(m_pm.PaymentMethod, m_pm.PaymentMethod.id == m_re.RestaurantExpense.payment_method_id)
         .filter(
             m_re.RestaurantExpense.up_company_id == up_obj.id,
             m_re.RestaurantExpense.report_month == report_month,
+            # включаем только методы, участвующие в дневном учёте; если метода нет — не отфильтровываем
+            (m_re.RestaurantExpense.payment_method_id.is_(None)) | (m_pm.PaymentMethod.participates_in_daily.is_(True)),
         )
         .group_by(m_re.RestaurantExpense.date)
         .all()

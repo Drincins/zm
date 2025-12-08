@@ -62,7 +62,7 @@ def _render_users_table(users, companies, categories) -> None:
 def _render_add_user(session, users, companies, categories) -> None:
     username = st.text_input("Логин")
     password = st.text_input("Пароль", type="password")
-    role = st.selectbox("Роль", options=["admin", "manager"], index=1)
+    role = st.selectbox("Роль", options=["admin", "manager"], index=1, key="user_add_role")
     is_active = st.checkbox("Активен", value=True, key="user_add_active")
 
     companies_options = {c.name: c.id for c in companies}
@@ -120,7 +120,7 @@ def _render_edit_user(session, users, companies, categories) -> None:
 
     new_username = st.text_input("Логин", value=user.username)
     new_password = st.text_input("Новый пароль (если нужно сменить)", type="password")
-    role = st.selectbox("Роль", options=["admin", "manager"], index=0 if user.role == "admin" else 1)
+    role = st.selectbox("Роль", options=["admin", "manager"], index=0 if user.role == "admin" else 1, key=f"user_edit_role_{user.id}")
     is_active = st.checkbox("Активен", value=bool(user.is_active), key=f"user_edit_active_{user.id}")
 
     companies_options = {c.name: c.id for c in companies}
