@@ -11,3 +11,5 @@ oauth2client
 xlsxwriter
 psycopg2-binary
 python-dotenv
+streamlit-cookies-manager
+alembic
