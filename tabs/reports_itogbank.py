@@ -394,7 +394,7 @@ def _render_reports_itogbank(session):
         [show_cat, pd.DataFrame([{"Категория": "ИТОГО", "Сумма": _fmt_rub(total_cat)}])],
         ignore_index=True
     )
-    st.dataframe(show_cat, width="stretch", hide_index=True)
+    st.dataframe(show_cat, use_container_width=True, hide_index=True)
 
     # --- Drill-down: Категория → Операции + редактор ---
     st.markdown("#### Операции выбранной категории")
@@ -433,7 +433,7 @@ def _render_reports_itogbank(session):
         disp_df["Записано"] = disp_df["Записано"].apply(lambda v: "✅" if bool(v) else "")
 
         disp_df["Дата"] = pd.to_datetime(disp_df["Дата"], errors="coerce", dayfirst=True).dt.strftime("%d.%m.%Y")
-        st.dataframe(disp_df.drop(columns=["id"]), width="stretch", hide_index=True)
+        st.dataframe(disp_df.drop(columns=["id"]), use_container_width=True, hide_index=True)
 
         # --- Выбор операции для редактирования ---
         options_ops = []

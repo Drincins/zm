@@ -3,7 +3,6 @@ import streamlit as st
 from tabs.import_main import import_tab
 from tabs.redact_main import redact_tab
 from tabs.reports_main import reports_main
-from tabs.import_income_expenses import import_income_expenses_tab
 
 
 def logout_button(cookies, clear_session_fn=None):
@@ -34,7 +33,6 @@ def render_main_menu(cookies, clear_session_fn=None):
                 "Импорт банковских выписок",
             ]
         )
-    menu_items.append("Доходы / Расходы ресторана")
     if is_admin:
         menu_items.append("Редактирование")
 
@@ -44,8 +42,6 @@ def render_main_menu(cookies, clear_session_fn=None):
         reports_main()
     elif menu == "Импорт банковских выписок":
         import_tab()
-    elif menu == "Доходы / Расходы ресторана":
-        import_income_expenses_tab()
     elif menu == "Редактирование":
         redact_tab()
 

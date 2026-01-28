@@ -180,7 +180,8 @@ def import_edit_operations_tab():
             allow_unsafe_jscode=True,
             theme="streamlit",
             height=650,
-            fit_columns_on_grid_load=True,
+            use_container_width=True,
+            fit_columns_on_grid_load=False,
         )
 
         #   
@@ -492,7 +493,7 @@ def import_edit_operations_tab():
                             "ID": op.id,
                         }
                     )
-                st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
                 if st.button("Создать/привязать контрагента", key=f"new_counterparty_btn_{idx}", width="stretch"):
                     try:

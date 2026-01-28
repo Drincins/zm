@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.db import SessionLocal
 from core.parser import clean_inn, parse_bank_statement_to_df
-from db_models import category, company, editbank, firm, group
+from db_models import category, company, editbank, firm, group, up_company
 from db_models import statement as m_statement
 
 BASE_BANK_DIR = Path(os.getenv("BANK_STATEMENTS_DIR", Path(__file__).resolve().parent.parent / "data" / "bank_statements"))
@@ -99,6 +99,63 @@ def parse_file(filepath: Path, session: Session):
 
     status = "empty" if df.empty else "ok"
     return df, new_inns, status
+
+
+def _build_preview_df(df: pd.DataFrame, session: Session) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    comp_map = {cid: name for cid, name in session.query(company.Company.id, company.Company.name).all()}
+    firm_map = {fid: name for fid, name in session.query(firm.Firm.id, firm.Firm.name).all()}
+    up_map = {uid: name for uid, name in session.query(up_company.UpCompany.id, up_company.UpCompany.name).all()}
+    cat_map = {cid: name for cid, name in session.query(category.Category.id, category.Category.name).all()}
+    group_map = {gid: name for gid, name in session.query(group.Group.id, group.Group.name).all()}
+
+    preview = df.copy()
+
+    # Плательщик
+    payer_name = pd.Series([""] * len(preview))
+    if "payer_company_id" in preview.columns:
+        payer_name = preview["payer_company_id"].map(comp_map)
+    if "payer_firm_id" in preview.columns:
+        payer_name = payer_name.fillna(preview["payer_firm_id"].map(firm_map))
+    if "payer_raw" in preview.columns:
+        payer_name = payer_name.fillna(preview["payer_raw"])
+    preview["Плательщик"] = payer_name.fillna("")
+
+    # Получатель
+    receiver_name = pd.Series([""] * len(preview))
+    if "receiver_company_id" in preview.columns:
+        receiver_name = preview["receiver_company_id"].map(comp_map)
+    if "receiver_firm_id" in preview.columns:
+        receiver_name = receiver_name.fillna(preview["receiver_firm_id"].map(firm_map))
+    if "receiver_raw" in preview.columns:
+        receiver_name = receiver_name.fillna(preview["receiver_raw"])
+    preview["Получатель"] = receiver_name.fillna("")
+
+    if "up_company_id" in preview.columns:
+        preview["Головная компания"] = preview["up_company_id"].map(up_map).fillna("")
+    if "za_kogo_platili_id" in preview.columns:
+        preview["За кого платили"] = preview["za_kogo_platili_id"].map(up_map).fillna("")
+
+    if "category_id" in preview.columns:
+        preview["Категория"] = preview["category_id"].map(cat_map).fillna("")
+    if "group_id" in preview.columns:
+        preview["Группа"] = preview["group_id"].map(group_map).fillna("")
+
+    # Скрываем id-колонки, чтобы в интерфейсе были "человеческие" значения
+    drop_cols = [
+        "payer_company_id",
+        "payer_firm_id",
+        "receiver_company_id",
+        "receiver_firm_id",
+        "up_company_id",
+        "za_kogo_platili_id",
+        "group_id",
+        "category_id",
+    ]
+    preview = preview.drop(columns=[c for c in drop_cols if c in preview.columns])
+    return preview
 
 
 def _import_df(df: pd.DataFrame, session: Session) -> tuple[int, int, int]:
@@ -234,7 +291,7 @@ def _render_import_new_operations(session: Session):
             col4.metric("Есть в Statement", len(existing_stmt & target_ids))
             if new_inns_up:
                 st.info(f"Новые ИНН: {', '.join(new_inns_up)}")
-            st.dataframe(df_up.head(30), use_container_width=True)
+            st.dataframe(_build_preview_df(df_up, session).head(30), use_container_width=True)
 
             if st.button("Импортировать загруженный файл в БД и отправить в архив", type="primary"):
                 imported, total, duplicate = _import_df(df_up, session)
@@ -296,7 +353,7 @@ def _render_import_new_operations(session: Session):
             col4.metric("Есть в Statement", len(existing_stmt & target_ids))
             if new_inns:
                 st.info(f"Новые ИНН: {', '.join(new_inns)}")
-            st.dataframe(df.head(30), use_container_width=True)
+            st.dataframe(_build_preview_df(df, session).head(30), use_container_width=True)
 
     if st.button("Загрузить выбранные файлы в БД (EditBank)"):
         imported_count = 0

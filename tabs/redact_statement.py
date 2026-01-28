@@ -289,8 +289,8 @@ def redact_statement():
             allow_unsafe_jscode=True,
             theme="streamlit",
             height=700,
-            width="stretch",
-            fit_columns_on_grid_load=True,
+            use_container_width=True,
+            fit_columns_on_grid_load=False,
             key="statement_table",  # постоянный ключ — состояние сохраняем вручную
         )
 
