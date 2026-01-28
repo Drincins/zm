@@ -44,7 +44,7 @@ def _resolve_month_year(raw_month: str | None, date_val) -> tuple[str | None, in
     return month_name, year_val
 
 def import_edit_operations_tab():
-    st.header("  (  )")
+    st.header("Редактирование операций (EditBank)")
 
     #    ( /)
     st.markdown("""
@@ -81,7 +81,7 @@ def import_edit_operations_tab():
         # ---    ---
         ops = session.query(editbank.EditBank).order_by(editbank.EditBank.date.desc()).all()
         if not ops:
-            st.info("  .    .")
+            st.info("Нет операций для редактирования. Сначала импортируйте банковские операции.")
             return
 
         # ---  DataFrame   ---
@@ -92,9 +92,9 @@ def import_edit_operations_tab():
             inferred_up_id = op.up_company_id
             if not inferred_up_id:
                 op_type = (op.operation_type or "").strip().lower()
-                if "" in op_type and op.payer_company_id:
+                if "списание" in op_type and op.payer_company_id:
                     inferred_up_id = company_up_map.get(op.payer_company_id)
-                elif "" in op_type and op.receiver_company_id:
+                elif "поступление" in op_type and op.receiver_company_id:
                     inferred_up_id = company_up_map.get(op.receiver_company_id)
                 if not inferred_up_id:
                     inferred_up_id = company_up_map.get(op.payer_company_id) or company_up_map.get(op.receiver_company_id)
@@ -104,37 +104,37 @@ def import_edit_operations_tab():
 
             df_rows.append({
                 "id": op.id,
-                "": op.date.strftime('%d.%m.%Y') if op.date else "",
-                " ": month_name or "",
-                " ": year_val,
-                " ": up_company_map.get(inferred_up_id, ""),
-                "  ": up_company_map.get(zk_id, ""),  # NEW
-                "": (
+                "date": op.date.strftime('%d.%m.%Y') if op.date else "",
+                "report_month_label": month_name or "",
+                "report_year": year_val,
+                "up_company": up_company_map.get(inferred_up_id, ""),
+                "pay_for": up_company_map.get(zk_id, ""),  # NEW
+                "payer": (
                     company_map.get(op.payer_company_id)
                     or firm_map.get(op.payer_firm_id)
                     or op.payer_raw
                     or ""
                 ),
-                " ": clean_inn(op.payer_inn) or "",
-                "": (
+                "payer_inn": clean_inn(op.payer_inn) or "",
+                "receiver": (
                     company_map.get(op.receiver_company_id)
                     or firm_map.get(op.receiver_firm_id)
                     or op.receiver_raw
                     or ""
                 ),
-                " ": clean_inn(op.receiver_inn) or "",
-                "": op.purpose or "",
-                "": op.amount,
-                " ": op.operation_type or "",
-                "": category_map.get(op.category_id, ""),
-                "": group_map.get(op.group_id, ""),
-                "": op.comment or "",
+                "receiver_inn": clean_inn(op.receiver_inn) or "",
+                "purpose": op.purpose or "",
+                "amount": op.amount,
+                "operation_type": op.operation_type or "",
+                "category": category_map.get(op.category_id, ""),
+                "group": group_map.get(op.group_id, ""),
+                "comment": op.comment or "",
                 "row_id": op.row_id,
-                "": bool(op.recorded),
+                "recorded": bool(op.recorded),
             })
         df = pd.DataFrame(df_rows)
-        if "" in df.columns:
-            df[""] = pd.to_datetime(df[""], dayfirst=True, errors="coerce")\
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")\
                             .dt.strftime("%d.%m.%Y")\
                             .fillna("")
         # --- :     label->raw    ---
@@ -154,25 +154,23 @@ def import_edit_operations_tab():
         )
 
         #        (  )
-        gb.configure_column(" ", editable=False)
-
-        #    
-        gb.configure_column("", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column(" ", editable=False)
-        gb.configure_column("  ", editable=False)
-        gb.configure_column("", editable=False)
-
-        gb.configure_column("", editable=False)
-        gb.configure_column(" ", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column(" ", editable=False)
-        gb.configure_column(" ", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column("", editable=False)
-        gb.configure_column("row_id", editable=False)
+        gb.configure_column("date", header_name="Дата", editable=False)
+        gb.configure_column("report_month_label", header_name="Месяц", editable=False)
+        gb.configure_column("report_year", header_name="Год", editable=False)
+        gb.configure_column("up_company", header_name="Головная", editable=False)
+        gb.configure_column("pay_for", header_name="За кого платили", editable=False)
+        gb.configure_column("payer", header_name="Плательщик", editable=False)
+        gb.configure_column("payer_inn", header_name="ИНН плательщика", editable=False)
+        gb.configure_column("receiver", header_name="Получатель", editable=False)
+        gb.configure_column("receiver_inn", header_name="ИНН получателя", editable=False)
+        gb.configure_column("purpose", header_name="Назначение", editable=False)
+        gb.configure_column("amount", header_name="Сумма", editable=False)
+        gb.configure_column("operation_type", header_name="Тип", editable=False)
+        gb.configure_column("category", header_name="Категория", editable=False)
+        gb.configure_column("group", header_name="Группа", editable=False)
+        gb.configure_column("comment", header_name="Комментарий", editable=False)
+        gb.configure_column("recorded", header_name="Записано", editable=False)
+        gb.configure_column("row_id", header_name="row_id", editable=False)
 
         grid_options = gb.build()
         grid_response = AgGrid(
@@ -200,33 +198,33 @@ def import_edit_operations_tab():
                 selected_list = selected_raw.to_dict("records")
             except Exception:
                 selected_list = []
-        # ===================== - ( ) =====================
+        # ===================== Действия с выбранными =====================
         col1, col2, col3 = st.columns([2.5, 2.5, 3])
         with col1:
-            btn_transfer_sel = st.button("   Statement", disabled=(len(selected_list) == 0), width="stretch")
+            btn_transfer_sel = st.button("Перенести в Statement", disabled=(len(selected_list) == 0), width="stretch")
         with col2:
-            btn_delete_sel = st.button("    ", disabled=(len(selected_list) == 0), width="stretch")
+            btn_delete_sel = st.button("Удалить выбранные", disabled=(len(selected_list) == 0), width="stretch")
         # col3   
         with col3:
             pop = getattr(st, "popover", None)
-            ctx_edit = pop("   ") if pop else st.expander("   ")
+            ctx_edit = pop("Редактирование операции") if pop else st.expander("Редактирование операции")
 
         # ---------------------     ---------------------
         with ctx_edit:
             if len(selected_list) != 1:
-                st.info("       .")
+                st.info("Выберите одну строку для редактирования.")
             else:
                 sel_id = int(float(selected_list[0]["id"]))
                 obj = session.get(editbank.EditBank, sel_id)
                 if not obj:
-                    st.warning("  .")
+                    st.warning("Операция не найдена.")
                 else:
                     # read-only 
                     payer_name = company_map.get(obj.payer_company_id) or firm_map.get(obj.payer_firm_id) or (obj.payer_raw or "")
                     receiver_name = company_map.get(obj.receiver_company_id) or firm_map.get(obj.receiver_firm_id) or (obj.receiver_raw or "")
-                    st.markdown(f"**:** {payer_name}")
-                    st.markdown(f"**:** {receiver_name}")
-                    st.markdown(f"** :** {up_company_map.get(obj.up_company_id, '')}")
+                    st.markdown(f"**Плательщик:** {payer_name}")
+                    st.markdown(f"**Получатель:** {receiver_name}")
+                    st.markdown(f"**Головная компания:** {up_company_map.get(obj.up_company_id, '')}")
                     st.divider()
 
                     #   
@@ -238,42 +236,45 @@ def import_edit_operations_tab():
                     col_l, col_r = st.columns(2)
                     with col_l:
                         new_month_name = st.selectbox(
-                            " ",
+                            "Месяц",
                             options=RU_MONTHS,
                             index=(RU_MONTHS.index(cur_month_name) if cur_month_name in RU_MONTHS else 0),
                         )
                         new_year_val = st.number_input(
-                            " ",
+                            "Год",
                             value=int(cur_year_val or 2025),
                             min_value=2000,
                             max_value=2100,
                             step=1,
                         )
 
-                        new_type = st.selectbox(" ", options=["", ""],
-                                                index=(0 if (obj.operation_type or "").strip().lower() == "" else 1))
-                        new_amount = st.number_input("", value=float(obj.amount or 0.0), step=100.0, format="%.2f")
+                        new_type = st.selectbox(
+                            "Тип операции",
+                            options=["Списание", "Поступление"],
+                            index=(0 if (obj.operation_type or "").strip().lower() == "списание" else 1),
+                        )
+                        new_amount = st.number_input("Сумма", value=float(obj.amount or 0.0), step=100.0, format="%.2f")
                         up_names_all = [u.name for u in up_companies]
-                        sel_zk_name = st.selectbox("  ", options=up_names_all,
+                        sel_zk_name = st.selectbox("За кого платили", options=up_names_all,
                                                    index=(up_names_all.index(cur_zk_name) if cur_zk_name in up_names_all else 0))
                         sel_zk = next((u for u in up_companies if u.name == sel_zk_name), None)
 
                     with col_r:
                         group_names = [g.name for g in groups]
-                        sel_group_name = st.selectbox("", options=[""] + group_names,
+                        sel_group_name = st.selectbox("Группа", options=["—"] + group_names,
                                                       index=(group_names.index(cur_group_name) + 1) if cur_group_name in group_names else 0)
                         sel_group = next((g for g in groups if g.name == sel_group_name), None)
 
                         #    
                         cats_for_group = cats_by_group.get(sel_group.id if sel_group else None, [])
                         cat_names = [c.name for c in cats_for_group] if cats_for_group else [c.name for c in categories]
-                        sel_cat_name = st.selectbox("", options=[""] + cat_names,
+                        sel_cat_name = st.selectbox("Категория", options=["—"] + cat_names,
                                                     index=(cat_names.index(cur_cat_name) + 1) if cur_cat_name in cat_names else 0)
 
-                    new_purpose = st.text_input("", value=(obj.purpose or ""))
-                    new_comment = st.text_area("", value=(obj.comment or ""), height=120)
+                    new_purpose = st.text_input("Назначение", value=(obj.purpose or ""))
+                    new_comment = st.text_area("Комментарий", value=(obj.comment or ""), height=120)
 
-                    if st.button("  ", width="stretch"):
+                    if st.button("Сохранить изменения", width="stretch"):
                         try:
                             obj.report_month = new_month_name
                             obj.report_year = int(new_year_val) if new_year_val else None
@@ -287,7 +288,7 @@ def import_edit_operations_tab():
                             obj.comment = (new_comment or None)
 
                             # /
-                            if sel_cat_name and sel_cat_name != "":
+                            if sel_cat_name and sel_cat_name != "—":
                                 new_cat = next((c for c in categories if c.name == sel_cat_name), None)
                                 if new_cat:
                                     obj.category_id = new_cat.id
@@ -301,11 +302,11 @@ def import_edit_operations_tab():
                                 obj.za_kogo_platili_id = sel_zk.id
 
                             session.commit()
-                            st.success(" .")
+                            st.success("Изменения сохранены.")
                             st.rerun()
                         except Exception as e:
                             session.rollback()
-                            st.error(f" : {e}")
+                            st.error(f"Ошибка сохранения: {e}")
 
         # ---------------------   ---------------------
         if btn_transfer_sel:
@@ -318,8 +319,8 @@ def import_edit_operations_tab():
                     continue
 
                 #  cat/group    
-                cat_id = next((k for k, v in category_map.items() if v == row.get("")), None)
-                group_id = next((k for k, v in group_map.items() if v == row.get("")), None)
+                cat_id = next((k for k, v in category_map.items() if v == row.get("category")), None)
+                group_id = next((k for k, v in group_map.items() if v == row.get("group")), None)
 
                 #   
                 op_db = session.query(editbank.EditBank).filter_by(row_id=row["row_id"]).first()
@@ -335,19 +336,19 @@ def import_edit_operations_tab():
                     )
                     zk_id = op_db.za_kogo_platili_id or inferred_up_id
                 else:
-                    zk_id = up_company_name_to_id.get(row.get("  ") or "")
-                    inferred_up_id = zk_id or up_company_name_to_id.get(row.get(" ") or "")
+                    zk_id = up_company_name_to_id.get(row.get("pay_for") or "")
+                    inferred_up_id = zk_id or up_company_name_to_id.get(row.get("up_company") or "")
 
                 # /    (  )
                 report_month_val, report_year_val = _resolve_month_year(
-                    row.get(" "),
-                    pd.to_datetime(row.get(""), dayfirst=True, errors="coerce") if row.get("") else (op_db.date if op_db else None),
+                    row.get("report_month_label"),
+                    pd.to_datetime(row.get("date"), dayfirst=True, errors="coerce") if row.get("date") else (op_db.date if op_db else None),
                 )
                 #          op_db
-                if not row.get("") and op_db and op_db.date:
+                if not row.get("date") and op_db and op_db.date:
                     date_for_year = op_db.date
                 else:
-                    date_for_year = pd.to_datetime(row.get(""), dayfirst=True, errors="coerce")
+                    date_for_year = pd.to_datetime(row.get("date"), dayfirst=True, errors="coerce")
                 if not report_year_val and date_for_year is not None:
                     try:
                         report_year_val = int(date_for_year.year)
@@ -356,19 +357,19 @@ def import_edit_operations_tab():
 
                 stmt = statement.Statement(
                     row_id=row.get("row_id"),
-                    date=pd.to_datetime(row.get(""), dayfirst=True) if row.get("") else (op_db.date if op_db else None),
+                    date=pd.to_datetime(row.get("date"), dayfirst=True) if row.get("date") else (op_db.date if op_db else None),
                     report_month=report_month_val,
                     report_year=report_year_val,
                     doc_number=op_db.doc_number if op_db else None,
-                    payer_inn=clean_inn(row.get(" ") or (op_db.payer_inn if op_db else "")),
-                    receiver_inn=clean_inn(row.get(" ") or (op_db.receiver_inn if op_db else "")),
-                    purpose=row.get("") or (op_db.purpose if op_db else None),
-                    amount=row.get("") if pd.notna(row.get("")) else (op_db.amount if op_db else None),
-                    operation_type=row.get(" ") or (op_db.operation_type if op_db else None),
-                    comment=row.get("") or (op_db.comment if op_db else None),
-                    recorded=bool(row.get("", False)),
-                    payer_raw=row.get("") or (op_db.payer_raw if op_db else None),
-                    receiver_raw=row.get("") or (op_db.receiver_raw if op_db else None),
+                    payer_inn=clean_inn(row.get("payer_inn") or (op_db.payer_inn if op_db else "")),
+                    receiver_inn=clean_inn(row.get("receiver_inn") or (op_db.receiver_inn if op_db else "")),
+                    purpose=row.get("purpose") or (op_db.purpose if op_db else None),
+                    amount=row.get("amount") if pd.notna(row.get("amount")) else (op_db.amount if op_db else None),
+                    operation_type=row.get("operation_type") or (op_db.operation_type if op_db else None),
+                    comment=row.get("comment") or (op_db.comment if op_db else None),
+                    recorded=bool(row.get("recorded", False)),
+                    payer_raw=row.get("payer") or (op_db.payer_raw if op_db else None),
+                    receiver_raw=row.get("receiver") or (op_db.receiver_raw if op_db else None),
                     category_id=cat_id or (op_db.category_id if op_db else None),
                     group_id=group_id or (op_db.group_id if op_db else None),
                     up_company_id=inferred_up_id,
@@ -382,7 +383,7 @@ def import_edit_operations_tab():
                 session.query(editbank.EditBank).filter_by(row_id=row["row_id"]).delete()
                 imported_count += 1
             session.commit()
-            st.success(f" : {imported_count}")
+            st.success(f"Перенесено в Statement: {imported_count}")
             st.rerun()
 
         if btn_delete_sel:
@@ -393,18 +394,18 @@ def import_edit_operations_tab():
                 except Exception:
                     continue
             if not ids_to_delete:
-                st.warning("    .")
+                st.warning("Не выбрано ни одной строки.")
             else:
                 try:
                     deleted = session.query(editbank.EditBank)\
                         .filter(editbank.EditBank.id.in_(ids_to_delete))\
                         .delete(synchronize_session=False)
                     session.commit()
-                    st.success(f" : {deleted}")
+                    st.success(f"Удалено: {deleted}")
                     st.rerun()
                 except Exception as e:
                     session.rollback()
-                    st.error(f"  : {e}")
+                    st.error(f"Ошибка удаления: {e}")
 
         #  
         def _fmt_rub(x):
@@ -422,7 +423,7 @@ def import_edit_operations_tab():
               ,   .
             """
             t = (op.operation_type or "").strip().lower()
-            if "" in t:
+            if "списание" in t:
                 name = company_map.get(op.payer_company_id) or firm_map.get(op.payer_firm_id) or (op.payer_raw or "")
                 inn  = clean_inn(op.payer_inn) or (clean_inn(firm_inn_map.get(op.payer_firm_id)) if op.payer_firm_id else "")
             else:
@@ -430,7 +431,7 @@ def import_edit_operations_tab():
                 inn  = clean_inn(op.receiver_inn) or (clean_inn(firm_inn_map.get(op.receiver_firm_id)) if op.receiver_firm_id else "")
             return name, inn
 
-        #    (   )       
+        #    контрагенты без категории
         ops_missing_cat = []
         for op in ops:
             if not op.group_id or not op.category_id:
@@ -461,42 +462,42 @@ def import_edit_operations_tab():
             new_groups.setdefault(key, []).append(op)
 
         if new_groups:
-            st.markdown("####   (   )")
+            st.markdown("#### Новые контрагенты без категории")
             for idx, ((nm, inn_val), op_list) in enumerate(sorted(new_groups.items(), key=lambda x: x[0][0].lower()), 1):
-                st.markdown(f"<div style='font-size:16px;font-weight:700;color:#d97706;'> : {nm}</div>", unsafe_allow_html=True)
-                st.markdown(f"*:* **{inn_val or ''}**  : **{len(op_list)}**")
+                st.markdown(f"<div style='font-size:16px;font-weight:700;color:#d97706;'>Контрагент: {nm}</div>", unsafe_allow_html=True)
+                st.markdown(f"*ИНН:* **{inn_val or ''}**  •  *Операций:* **{len(op_list)}**")
 
                 #      
                 cat_names = [c.name for c in categories]
                 sel_cat_name = st.selectbox(
-                    "    (    )",
+                    "Категория для контрагента",
                     options=cat_names,
                     index=0,
                     key=f"new_counterparty_cat_{idx}",
                 )
                 sel_cat = next((c for c in categories if c.name == sel_cat_name), None)
                 group_hint = next((g.name for g in groups if sel_cat and g.id == sel_cat.group_id), "")
-                st.caption(f"  : **{group_hint}**")
+                st.caption(f"Группа: **{group_hint}**")
 
                 #  
                 table_rows = []
                 for op in op_list:
                     table_rows.append(
                         {
-                            "": _fmt_date(op.date),
-                            "": _fmt_rub(op.amount),
-                            "": company_map.get(op.payer_company_id) or firm_map.get(op.payer_firm_id) or (op.payer_raw or ""),
-                            "": company_map.get(op.receiver_company_id) or firm_map.get(op.receiver_firm_id) or (op.receiver_raw or ""),
-                            "": op.purpose or "",
+                            "Дата": _fmt_date(op.date),
+                            "Сумма": _fmt_rub(op.amount),
+                            "Плательщик": company_map.get(op.payer_company_id) or firm_map.get(op.payer_firm_id) or (op.payer_raw or ""),
+                            "Получатель": company_map.get(op.receiver_company_id) or firm_map.get(op.receiver_firm_id) or (op.receiver_raw or ""),
+                            "Назначение": op.purpose or "",
                             "ID": op.id,
                         }
                     )
                 st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
 
-                if st.button("       ", key=f"new_counterparty_btn_{idx}", width="stretch"):
+                if st.button("Создать/привязать контрагента", key=f"new_counterparty_btn_{idx}", width="stretch"):
                     try:
                         if not sel_cat:
-                            st.error("  .")
+                            st.error("Выберите категорию.")
                         else:
                             firm_obj = None
                             if inn_val:
@@ -518,9 +519,10 @@ def import_edit_operations_tab():
                                 op.group_id = sel_cat.group_id
 
                             session.commit()
-                            st.success(f"/: {nm}   {inn_val or ''}.  : {len(op_list)}")
+                            inn_label = inn_val or "без ИНН"
+                            st.success(f"Контрагент '{nm}' ({inn_label}) сохранён. Обновлено операций: {len(op_list)}")
                             st.rerun()
                     except Exception as e:
                         session.rollback()
-                        st.error(f": {e}")
+                        st.error(f"Ошибка сохранения: {e}")
 
