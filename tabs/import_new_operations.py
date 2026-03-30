@@ -151,6 +151,10 @@ def _build_preview_df(df: pd.DataFrame, session: Session) -> pd.DataFrame:
         preview["Головная компания"] = preview["up_company_id"].map(up_map).fillna("")
     if "za_kogo_platili_id" in preview.columns:
         preview["За кого платили"] = preview["za_kogo_platili_id"].map(up_map).fillna("")
+    if "payer_account" in preview.columns:
+        preview["Счет плательщика"] = preview["payer_account"].fillna("")
+    if "receiver_account" in preview.columns:
+        preview["Счет получателя"] = preview["receiver_account"].fillna("")
 
     if "category_id" in preview.columns:
         preview["Категория"] = preview["category_id"].map(cat_map).fillna("")
@@ -167,6 +171,8 @@ def _build_preview_df(df: pd.DataFrame, session: Session) -> pd.DataFrame:
         "za_kogo_platili_id",
         "group_id",
         "category_id",
+        "payer_account",
+        "receiver_account",
     ]
     preview = preview.drop(columns=[c for c in drop_cols if c in preview.columns])
     return preview

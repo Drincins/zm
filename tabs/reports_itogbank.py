@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 from sqlalchemy import or_
+from core.parser import clean_account
 from core.utils import normalize_amount_by_type
 from core.months import format_report_month_label, format_month_year
 
@@ -152,6 +153,8 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
             m_statement.Statement.operation_type.label("operation_type"),
             m_statement.Statement.comment.label("comment"),
             m_statement.Statement.recorded.label("recorded"),
+            m_statement.Statement.payer_account.label("_payer_account"),
+            m_statement.Statement.receiver_account.label("_receiver_account"),
             # служебные поля для доп. колонок
             m_statement.Statement.payer_company_id.label("_payer_company_id"),
             m_statement.Statement.payer_firm_id.label("_payer_firm_id"),
@@ -198,6 +201,8 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         "Категория": r.category_name,
         "Комментарий": r.comment,
         "Записано": r.recorded,
+        "_payer_account": r._payer_account,
+        "_receiver_account": r._receiver_account,
         "_payer_company_id": r._payer_company_id,
         "_payer_firm_id": r._payer_firm_id,
         "_payer_raw": r._payer_raw,
@@ -257,6 +262,8 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         .fillna(df["_receiver_raw"])
         .fillna("")
     )
+    df["Счет плательщика"] = df["_payer_account"].map(clean_account).fillna("")
+    df["Счет получателя"] = df["_receiver_account"].map(clean_account).fillna("")
     df["Головная компания"] = df["_up_company_id"].map(up_name_by_id).fillna("")
     # Отображение «За кого платили» — корректное имя поля
     if "_za_kogo_platili_id" in df.columns:
@@ -540,7 +547,8 @@ def _render_reports_itogbank(session):
         # добавили Плательщика/ГК/За кого платили + ИТОГО одной строкой
         view_df = ops_df[[
             "id", "Месяц", "Дата",
-            "Плательщик","Получатель", "Головная компания", "За кого платили",
+            "Плательщик", "Счет плательщика", "Получатель", "Счет получателя",
+            "Головная компания", "За кого платили",
             "Назначение", "Сумма", "Записано", "Тип", "Комментарий"  # ← добавили «Записано»
         ]].copy().sort_values(["Дата", "id"], ascending=[False, False], na_position="last").reset_index(drop=True)
 
@@ -556,7 +564,11 @@ def _render_reports_itogbank(session):
             search_blob = (
                 view_df["Плательщик"].fillna("").astype(str)
                 + " "
+                + view_df["Счет плательщика"].fillna("").astype(str)
+                + " "
                 + view_df["Получатель"].fillna("").astype(str)
+                + " "
+                + view_df["Счет получателя"].fillna("").astype(str)
                 + " "
                 + view_df["Головная компания"].fillna("").astype(str)
                 + " "
@@ -578,7 +590,8 @@ def _render_reports_itogbank(session):
         total_ops = float(pd.to_numeric(filtered_view_df["Сумма"], errors="coerce").fillna(0).sum())
         total_row = {
             "id": None, "Месяц": "", "Дата": "",
-            "Плательщик": "", "Получатель": "", "Головная компания": "", "За кого платили": "",
+            "Плательщик": "", "Счет плательщика": "", "Получатель": "", "Счет получателя": "",
+            "Головная компания": "", "За кого платили": "",
             "Назначение": "ИТОГО",
             "Сумма": _fmt_rub(total_ops), "Записано": "", "Тип": "", "Комментарий": ""  # ← пусто для итога
         }
@@ -660,6 +673,8 @@ def _render_reports_itogbank(session):
             )
             st.caption(op_labels.get(selected_id, ""))
             obj = session.get(m_statement.Statement, selected_id)
+            st.markdown(f"**Счет плательщика:** {clean_account(getattr(obj, 'payer_account', None)) or '—'}")
+            st.markdown(f"**Счет получателя:** {clean_account(getattr(obj, 'receiver_account', None)) or '—'}")
 
             # Справочники
             groups = session.query(m_group.Group).order_by(m_group.Group.name.asc()).all()

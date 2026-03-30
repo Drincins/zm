@@ -126,8 +126,6 @@ def import_edit_operations_tab():
                 "op_type": sel_type,
                 "recorded": sel_recorded,
             }
-            st.session_state["editbank_page"] = 1
-            st.session_state["editbank_page_input"] = 1
 
         fstate = st.session_state["editbank_filters"]
         filtered_query = session.query(editbank.EditBank)
@@ -148,36 +146,13 @@ def import_edit_operations_tab():
         elif rec_filter == "Только записанные":
             filtered_query = filtered_query.filter(editbank.EditBank.recorded.is_(True))
 
-        total_rows = filtered_query.count()
-        page_size = st.selectbox("Строк на странице", options=[50, 100, 200, 500], index=1, key="editbank_page_size")
-        total_pages = max(1, (total_rows + page_size - 1) // page_size)
-        current_page = min(max(int(st.session_state.get("editbank_page", 1)), 1), total_pages)
-        page_input_value = min(max(int(st.session_state.get("editbank_page_input", current_page)), 1), total_pages)
-        st.session_state["editbank_page_input"] = page_input_value
-
-        p1, p2 = st.columns([1, 4])
-        with p1:
-            current_page = int(
-                st.number_input(
-                    "Страница",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=page_input_value,
-                    step=1,
-                    key="editbank_page_input",
-                )
-            )
-        st.session_state["editbank_page"] = current_page
-        with p2:
-            st.caption(f"Найдено строк: {total_rows}. Показано: {min(page_size, max(total_rows - (current_page - 1) * page_size, 0))}. Страница {current_page}/{total_pages}.")
-
         ops = (
             filtered_query
             .order_by(editbank.EditBank.date.desc(), editbank.EditBank.id.desc())
-            .offset((current_page - 1) * page_size)
-            .limit(page_size)
             .all()
         )
+        total_rows = len(ops)
+        st.caption(f"Найдено строк: {total_rows}. Ниже показан полный список, используйте фильтры и прокрутку таблицы.")
         if not ops:
             st.info("По текущим фильтрам записи не найдены.")
             return
@@ -218,6 +193,7 @@ def import_edit_operations_tab():
                         or op.payer_raw
                         or ""
                     ),
+                    "Счет плательщика": clean_account(op.payer_account) or "",
                     "ИНН плательщика": clean_inn(op.payer_inn) or "",
                     "Получатель": (
                         company_map.get(op.receiver_company_id)
@@ -225,6 +201,7 @@ def import_edit_operations_tab():
                         or op.receiver_raw
                         or ""
                     ),
+                    "Счет получателя": clean_account(op.receiver_account) or "",
                     "ИНН получателя": clean_inn(op.receiver_inn) or "",
                     "Назначение": op.purpose or "",
                     "Сумма": op.amount,
@@ -274,7 +251,9 @@ def import_edit_operations_tab():
             "Тип операции",
             "Назначение",
             "Сумма",
+            "Счет плательщика",
             "ИНН плательщика",
+            "Счет получателя",
             "ИНН получателя",
             "Плательщик",
             "Получатель",
@@ -290,7 +269,7 @@ def import_edit_operations_tab():
             update_mode=GridUpdateMode.MODEL_CHANGED,
             allow_unsafe_jscode=True,
             theme="streamlit",
-            height=650,
+            height=780,
             fit_columns_on_grid_load=True,
         )
 
@@ -309,6 +288,12 @@ def import_edit_operations_tab():
                 selected_list = selected_raw.to_dict("records")
             except Exception:
                 selected_list = []
+        selected_ids = []
+        for row in selected_list:
+            try:
+                selected_ids.append(int(float(row.get("id"))))
+            except Exception:
+                continue
         # ===================== КНОПКИ-ДЕЙСТВИЯ (в линию) =====================
         col1, col2, col3 = st.columns([2.5, 2.5, 3])
         with col1:
@@ -349,7 +334,9 @@ def import_edit_operations_tab():
                         or (obj.receiver_raw or "—")
                     )
                     st.markdown(f"**Плательщик:** {payer_name}")
+                    st.markdown(f"**Счет плательщика:** {clean_account(obj.payer_account) or '—'}")
                     st.markdown(f"**Получатель:** {receiver_name}")
+                    st.markdown(f"**Счет получателя:** {clean_account(obj.receiver_account) or '—'}")
                     st.markdown(f"**Головная компания:** {up_company_map.get(obj.up_company_id, '—')}")
                     st.divider()
 
@@ -443,6 +430,171 @@ def import_edit_operations_tab():
                         except Exception as e:
                             session.rollback()
                             st.error(f"Ошибка сохранения: {e}")
+
+        with st.expander(f"Массовое изменение параметров — выделено {len(selected_ids)}"):
+            st.caption("Выберите параметр и задайте новое значение для всех выделенных строк.")
+            bulk_field = st.selectbox(
+                "Что изменить",
+                options=["Категория", "Учётный месяц", "Тип операции", "Головная компания", "За кого платили", "Записано"],
+                key="editbank_bulk_field",
+            )
+
+            target_category = None
+            target_month = None
+            month_error = None
+            target_operation_type = ""
+            target_up_company_id = None
+            apply_up_company = False
+            target_za_kogo_id = None
+            apply_za_kogo = False
+            target_recorded = None
+            apply_recorded = False
+
+            if bulk_field == "Категория":
+                bulk_cat_name = st.selectbox(
+                    "Новая категория",
+                    options=["—"] + [c.name for c in categories],
+                    index=0,
+                    key="editbank_bulk_category_select",
+                )
+                if bulk_cat_name != "—":
+                    target_category = next((c for c in categories if c.name == bulk_cat_name), None)
+                st.caption("Группа будет обновлена автоматически по выбранной категории.")
+
+            elif bulk_field == "Учётный месяц":
+                month_options = []
+                for month_name in RU_MONTHS + sorted(report_month_options):
+                    if month_name not in month_options:
+                        month_options.append(month_name)
+                month_choice = st.selectbox(
+                    "Новый учётный месяц",
+                    options=["—"] + month_options,
+                    index=0,
+                    key="editbank_bulk_month_select",
+                )
+                month_manual = st.text_input(
+                    "Или введите вручную",
+                    key="editbank_bulk_month_manual",
+                    placeholder="Например: Март или 2026-03",
+                ).strip()
+                if month_manual:
+                    target_month = month_manual
+                elif month_choice != "—":
+                    target_month = month_choice
+                if month_manual and len(month_manual) == 7 and month_manual[4] == "-":
+                    if not (month_manual[:4].isdigit() and month_manual[5:].isdigit()):
+                        month_error = "Формат YYYY-MM должен содержать только цифры."
+                if month_error:
+                    st.warning(month_error)
+
+            elif bulk_field == "Тип операции":
+                op_choice = st.selectbox(
+                    "Новый тип операции",
+                    options=["—"] + ["Списание", "Поступление"] + [v for v in op_type_options if v not in {"Списание", "Поступление"}],
+                    index=0,
+                    key="editbank_bulk_op_select",
+                )
+                op_manual = st.text_input(
+                    "Или введите вручную",
+                    key="editbank_bulk_op_manual",
+                ).strip()
+                if op_manual:
+                    target_operation_type = op_manual
+                elif op_choice != "—":
+                    target_operation_type = op_choice
+
+            elif bulk_field == "Головная компания":
+                up_choice = st.selectbox(
+                    "Новая головная компания",
+                    options=["—"] + list(up_company_name_to_id.keys()),
+                    index=0,
+                    key="editbank_bulk_up_company_select",
+                )
+                if up_choice != "—":
+                    target_up_company_id = up_company_name_to_id.get(up_choice)
+                    apply_up_company = target_up_company_id is not None
+
+            elif bulk_field == "За кого платили":
+                za_kogo_choice = st.selectbox(
+                    "Новое значение поля «За кого платили»",
+                    options=["—"] + list(up_company_name_to_id.keys()),
+                    index=0,
+                    key="editbank_bulk_za_kogo_select",
+                )
+                if za_kogo_choice != "—":
+                    target_za_kogo_id = up_company_name_to_id.get(za_kogo_choice)
+                    apply_za_kogo = target_za_kogo_id is not None
+
+            elif bulk_field == "Записано":
+                recorded_choice = st.selectbox(
+                    "Новый статус",
+                    options=["—", "Записано", "Не записано"],
+                    index=0,
+                    key="editbank_bulk_recorded_select",
+                )
+                if recorded_choice == "Записано":
+                    target_recorded = True
+                    apply_recorded = True
+                elif recorded_choice == "Не записано":
+                    target_recorded = False
+                    apply_recorded = True
+
+            can_apply = False
+            if bulk_field == "Категория":
+                can_apply = bool(selected_ids and target_category)
+            elif bulk_field == "Учётный месяц":
+                can_apply = bool(selected_ids and target_month and not month_error)
+            elif bulk_field == "Тип операции":
+                can_apply = bool(selected_ids and target_operation_type)
+            elif bulk_field == "Головная компания":
+                can_apply = bool(selected_ids and apply_up_company)
+            elif bulk_field == "За кого платили":
+                can_apply = bool(selected_ids and apply_za_kogo)
+            elif bulk_field == "Записано":
+                can_apply = bool(selected_ids and apply_recorded)
+
+            if st.button("🔧 Применить к выбранным", width="stretch", disabled=not can_apply, key="editbank_bulk_apply"):
+                if not selected_ids:
+                    st.warning("Не выбрано ни одной строки.")
+                elif bulk_field == "Категория" and not target_category:
+                    st.warning("Выберите категорию.")
+                elif bulk_field == "Учётный месяц" and (month_error or not target_month):
+                    st.warning(month_error or "Выберите или введите месяц.")
+                elif bulk_field == "Тип операции" and not target_operation_type:
+                    st.warning("Укажите тип операции.")
+                elif bulk_field == "Головная компания" and not apply_up_company:
+                    st.warning("Выберите головную компанию.")
+                elif bulk_field == "За кого платили" and not apply_za_kogo:
+                    st.warning("Выберите значение «За кого платили».")
+                elif bulk_field == "Записано" and not apply_recorded:
+                    st.warning("Выберите статус записи.")
+                else:
+                    try:
+                        updated = 0
+                        for rid in selected_ids:
+                            obj = session.get(editbank.EditBank, rid)
+                            if not obj:
+                                continue
+                            if bulk_field == "Категория" and target_category:
+                                obj.category_id = target_category.id
+                                obj.group_id = target_category.group_id
+                            elif bulk_field == "Учётный месяц" and target_month:
+                                obj.report_month = target_month
+                            elif bulk_field == "Тип операции" and target_operation_type:
+                                obj.operation_type = target_operation_type
+                            elif bulk_field == "Головная компания" and apply_up_company:
+                                obj.up_company_id = target_up_company_id
+                            elif bulk_field == "За кого платили" and apply_za_kogo:
+                                obj.za_kogo_platili_id = target_za_kogo_id
+                            elif bulk_field == "Записано" and apply_recorded:
+                                obj.recorded = target_recorded
+                            updated += 1
+                        session.commit()
+                        st.success(f"Обновлено строк: {updated}")
+                        st.rerun()
+                    except Exception as e:
+                        session.rollback()
+                        st.error(f"Ошибка массового изменения: {e}")
 
         # --------------------- Обработчики кнопок ---------------------
         if btn_transfer_sel:
@@ -646,9 +798,11 @@ def import_edit_operations_tab():
                             "Плательщик": company_map.get(op.payer_company_id)
                             or firm_map.get(op.payer_firm_id)
                             or (op.payer_raw or ""),
+                            "Счет плательщика": clean_account(op.payer_account) or "",
                             "Получатель": company_map.get(op.receiver_company_id)
                             or firm_map.get(op.receiver_firm_id)
                             or (op.receiver_raw or ""),
+                            "Счет получателя": clean_account(op.receiver_account) or "",
                             "Назначение": op.purpose or "",
                             "ID": op.id,
                         }

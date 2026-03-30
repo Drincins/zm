@@ -27,6 +27,7 @@ def redact_statement():
 
         company_dict = {c.id: c.name for c in companies}
         up_company_dict = {u.id: u.name for u in up_companies}
+        up_company_name_to_id = {u.name: u.id for u in up_companies}
         cat_dict = {c.id: c.name for c in categories}
         group_dict = {g.id: g.name for g in groups}
         firm_dict = {f.id: f.name for f in firms}
@@ -135,8 +136,6 @@ def redact_statement():
                 "recorded": sel_recorded,
             }
             st.session_state["stmt_filters_applied"] = True
-            st.session_state["stmt_page"] = 1
-            st.session_state["stmt_page_input"] = 1
 
         if not st.session_state.get("stmt_filters_applied"):
             st.info("Настройте фильтры и нажмите «Применить», чтобы увидеть таблицу.")
@@ -254,35 +253,13 @@ def redact_statement():
         if where_clauses:
             filtered_query = filtered_query.filter(*where_clauses)
 
-        total_rows = filtered_query.count()
-        page_size = st.selectbox("Строк на странице", options=[50, 100, 200, 500], index=1, key="stmt_page_size")
-        total_pages = max(1, (total_rows + page_size - 1) // page_size)
-        current_page = min(max(int(st.session_state.get("stmt_page", 1)), 1), total_pages)
-        page_input_value = min(max(int(st.session_state.get("stmt_page_input", current_page)), 1), total_pages)
-        st.session_state["stmt_page_input"] = page_input_value
-        page_col1, page_col2 = st.columns([1, 4])
-        with page_col1:
-            current_page = int(
-                st.number_input(
-                    "Страница",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=page_input_value,
-                    step=1,
-                    key="stmt_page_input",
-                )
-            )
-        st.session_state["stmt_page"] = current_page
-        with page_col2:
-            st.caption(f"Найдено строк: {total_rows}. Показано: {min(page_size, max(total_rows - (current_page - 1) * page_size, 0))}. Страница {current_page}/{total_pages}.")
-
         page_rows = (
             filtered_query
             .order_by(statement.Statement.date.desc(), statement.Statement.id.desc())
-            .offset((current_page - 1) * page_size)
-            .limit(page_size)
             .all()
         )
+        total_rows = len(page_rows)
+        st.caption(f"Найдено строк: {total_rows}. Ниже показан полный список, используйте фильтры и прокрутку таблицы.")
 
         rows = []
         row_columns = [
@@ -292,7 +269,9 @@ def redact_statement():
             "Месяц",
             "Год",
             "Плательщик",
+            "Счет плательщика",
             "Получатель",
+            "Счет получателя",
             "Категория (название)",
             "Группа (название)",
             "Тип операции",
@@ -316,11 +295,13 @@ def redact_statement():
                     or firm_dict.get(s.payer_firm_id)
                     or (getattr(s, "payer_raw", None) or "—")
                 ),
+                "Счет плательщика": getattr(s, "payer_account", None) or "—",
                 "Получатель": (
                     company_dict.get(s.receiver_company_id)
                     or firm_dict.get(s.receiver_firm_id)
                     or (getattr(s, "receiver_raw", None) or "—")
                 ),
+                "Счет получателя": getattr(s, "receiver_account", None) or "—",
                 "Категория (название)": cat_dict.get(s.category_id, "—"),
                 "Группа (название)": group_dict.get(s.group_id, "—"),
                 "Тип операции": s.operation_type or "—",
@@ -336,7 +317,7 @@ def redact_statement():
             df_filtered["row_id"] = df_filtered["row_id"].astype(str)
 
         text_cols = [
-            "Дата", "Месяц", "Плательщик", "Получатель",
+            "Дата", "Месяц", "Плательщик", "Счет плательщика", "Получатель", "Счет получателя",
             "Категория (название)", "Группа (название)",
             "Тип операции", "Назначение", "Комментарий",
             "Головная компания", "За кого платили", "row_id"
@@ -424,7 +405,7 @@ def redact_statement():
         )
 
         # служебные поля — только чтение
-        for col in ["row_id", "Дата", "Месяц", "Плательщик", "Получатель", "Головная компания", "За кого платили"]:
+        for col in ["row_id", "Дата", "Месяц", "Плательщик", "Счет плательщика", "Получатель", "Счет получателя", "Головная компания", "За кого платили"]:
             if col in df_filtered.columns:
                 gb.configure_column(col, editable=False)
 
@@ -444,7 +425,7 @@ def redact_statement():
             update_mode=GridUpdateMode.SELECTION_CHANGED | GridUpdateMode.VALUE_CHANGED,
             allow_unsafe_jscode=True,
             theme="streamlit",
-            height=700,
+            height=780,
             use_container_width=True,
             fit_columns_on_grid_load=False,
             key="statement_table",  # постоянный ключ — состояние сохраняем вручную
@@ -545,7 +526,7 @@ def redact_statement():
                 # Упорядочим колонки для выгрузки (только те, что реально есть)
                 cols_order = [
                     "id", "row_id", "Дата", "Месяц",
-                    "Плательщик", "Получатель",
+                    "Плательщик", "Счет плательщика", "Получатель", "Счет получателя",
                     "Головная компания", "За кого платили",
                     "Группа (название)", "Категория (название)",
                     "Тип операции", "Назначение", "Сумма", "Комментарий", "Записано",
@@ -597,7 +578,9 @@ def redact_statement():
                                      or (getattr(obj, "receiver_raw", None) or "—"))
 
                     st.markdown(f"**Плательщик:** {payer_name}")
+                    st.markdown(f"**Счет плательщика:** {getattr(obj, 'payer_account', None) or '—'}")
                     st.markdown(f"**Получатель:** {receiver_name}")
+                    st.markdown(f"**Счет получателя:** {getattr(obj, 'receiver_account', None) or '—'}")
                     st.markdown(f"**Головная компания:** {up_company_dict.get(obj.up_company_id, '—')}")
                     st.divider()
 
@@ -743,7 +726,7 @@ def redact_statement():
             st.caption("Выберите параметр и задайте новое значение для всех выделенных строк.")
             bulk_field = st.selectbox(
                 "Что изменить",
-                options=["Категория", "Отчётный месяц", "Тип операции"],
+                options=["Категория", "Отчётный месяц", "Тип операции", "Головная компания", "За кого платили", "Записано"],
                 key="stmt_bulk_field",
             )
 
@@ -751,6 +734,12 @@ def redact_statement():
             target_month = None
             month_error = None
             target_operation_type = ""
+            target_up_company_id = None
+            apply_up_company = False
+            target_za_kogo_id = None
+            apply_za_kogo = False
+            target_recorded = None
+            apply_recorded = False
 
             if bulk_field == "Категория":
                 col_cat_select = st.columns([2, 1])
@@ -815,6 +804,42 @@ def redact_statement():
                 elif op_choice != "—":
                     target_operation_type = op_choice
 
+            elif bulk_field == "Головная компания":
+                up_choice = st.selectbox(
+                    "Новая головная компания",
+                    options=["—"] + list(up_company_name_to_id.keys()),
+                    index=0,
+                    key="stmt_bulk_up_company_select",
+                )
+                if up_choice != "—":
+                    target_up_company_id = up_company_name_to_id.get(up_choice)
+                    apply_up_company = target_up_company_id is not None
+
+            elif bulk_field == "За кого платили":
+                za_kogo_choice = st.selectbox(
+                    "Новое значение поля «За кого платили»",
+                    options=["—"] + list(up_company_name_to_id.keys()),
+                    index=0,
+                    key="stmt_bulk_za_kogo_select",
+                )
+                if za_kogo_choice != "—":
+                    target_za_kogo_id = up_company_name_to_id.get(za_kogo_choice)
+                    apply_za_kogo = target_za_kogo_id is not None
+
+            elif bulk_field == "Записано":
+                recorded_choice = st.selectbox(
+                    "Новый статус",
+                    options=["—", "Записано", "Не записано"],
+                    index=0,
+                    key="stmt_bulk_recorded_select",
+                )
+                if recorded_choice == "Записано":
+                    target_recorded = True
+                    apply_recorded = True
+                elif recorded_choice == "Не записано":
+                    target_recorded = False
+                    apply_recorded = True
+
             can_apply = False
             if bulk_field == "Категория":
                 can_apply = bool(selected_ids and target_category)
@@ -822,6 +847,12 @@ def redact_statement():
                 can_apply = bool(selected_ids and target_month and not month_error)
             elif bulk_field == "Тип операции":
                 can_apply = bool(selected_ids and target_operation_type)
+            elif bulk_field == "Головная компания":
+                can_apply = bool(selected_ids and apply_up_company)
+            elif bulk_field == "За кого платили":
+                can_apply = bool(selected_ids and apply_za_kogo)
+            elif bulk_field == "Записано":
+                can_apply = bool(selected_ids and apply_recorded)
 
             if st.button("🔧 Применить к выбранным", width="stretch", disabled=not can_apply, key="btn_bulk_apply"):
                 if not selected_ids:
@@ -832,6 +863,12 @@ def redact_statement():
                     st.warning(month_error or "Выберите или введите месяц.")
                 elif bulk_field == "Тип операции" and not target_operation_type:
                     st.warning("Укажите тип операции.")
+                elif bulk_field == "Головная компания" and not apply_up_company:
+                    st.warning("Выберите головную компанию.")
+                elif bulk_field == "За кого платили" and not apply_za_kogo:
+                    st.warning("Выберите значение «За кого платили».")
+                elif bulk_field == "Записано" and not apply_recorded:
+                    st.warning("Выберите статус записи.")
                 else:
                     try:
                         updated = 0
@@ -846,6 +883,12 @@ def redact_statement():
                                 s_obj.report_month = target_month
                             elif bulk_field == "Тип операции" and target_operation_type:
                                 s_obj.operation_type = target_operation_type
+                            elif bulk_field == "Головная компания" and apply_up_company:
+                                s_obj.up_company_id = target_up_company_id
+                            elif bulk_field == "За кого платили" and apply_za_kogo:
+                                s_obj.za_kogo_platili_id = target_za_kogo_id
+                            elif bulk_field == "Записано" and apply_recorded:
+                                s_obj.recorded = target_recorded
                             updated += 1
 
                         session.commit()
