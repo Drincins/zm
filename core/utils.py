@@ -1,7 +1,22 @@
+from __future__ import annotations
+
 # --- Нормализация знака суммы по типу операции ---
 def normalize_operation_type(op: str) -> str:
     """Приводим тип к нижнему регистру без пробелов."""
     return str(op or "").strip().lower()
+
+
+def canonical_operation_type(op: str | None) -> str | None:
+    """Приводим тип операции к единому виду для хранения в БД."""
+    normalized = normalize_operation_type(op)
+    if not normalized:
+        return None
+    if normalized == "списание":
+        return "Списание"
+    if normalized == "поступление":
+        return "Поступление"
+    return str(op).strip() or None
+
 
 def normalize_amount_by_type(operation_type: str, amount):
     """

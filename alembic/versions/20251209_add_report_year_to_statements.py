@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """add report_year to statements and normalize report_month to month name
 
 Revision ID: add_report_year_to_statements

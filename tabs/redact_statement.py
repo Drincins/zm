@@ -1,9 +1,12 @@
-﻿# tabs/redact_statement.py
+from __future__ import annotations
+
+# tabs/redact_statement.py
 from datetime import datetime
 import streamlit as st
 import pandas as pd
+from sqlalchemy import or_
 from core.db import SessionLocal
-from core.months import format_report_month_label, ru_label_from_rm, rm_from_ru_label, format_month_year
+from core.months import ru_label_from_rm, rm_from_ru_label
 from db_models import statement, company, up_company, category, group, firm
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 from io import BytesIO  # для формирования XLSX в памяти
@@ -38,56 +41,37 @@ def redact_statement():
         for c in categories:
             cats_by_group.setdefault(c.group_id, []).append(c)
 
-        # ----------------------------- Данные -----------------------------
-        stmts = session.query(statement.Statement).all()
-        all_report_months = sorted({s.report_month for s in stmts if s.report_month})
-        all_report_years = sorted({s.report_year for s in stmts if getattr(s, "report_year", None) is not None})
-        all_operation_types = sorted({(s.operation_type or "").strip() for s in stmts if s.operation_type})
-        rows = []
-        for s in stmts:
-            rid = f"RID_{s.row_id}" if getattr(s, "row_id", None) else "—"
-            rows.append({
-                "id": s.id,
-                "row_id": rid,
-                "Дата": s.date.strftime('%d.%m.%Y') if s.date else "—",
-                "Месяц": s.report_month or "—",
-                "Год": getattr(s, "report_year", None) or "—",
-                # Компания -> Фирма -> сырой текст
-                "Плательщик": (
-                    company_dict.get(s.payer_company_id)
-                    or firm_dict.get(s.payer_firm_id)
-                    or (getattr(s, "payer_raw", None) or "—")
-                ),
-                "Получатель": (
-                    company_dict.get(s.receiver_company_id)
-                    or firm_dict.get(s.receiver_firm_id)
-                    or (getattr(s, "receiver_raw", None) or "—")
-                ),
-                "Категория (название)": cat_dict.get(s.category_id, "—"),
-                "Группа (название)": group_dict.get(s.group_id, "—"),
-                "Тип операции": s.operation_type or "—",
-                "Назначение": s.purpose or "—",
-                "Сумма": s.amount if s.amount is not None else None,  # числом/NaN
-                "Комментарий": s.comment or "—",
-                "Головная компания": up_company_dict.get(s.up_company_id, "—"),
-                "За кого платили": up_company_dict.get(getattr(s, "za_kogo_platili_id", None), "—"),
-                "Записано": bool(getattr(s, "recorded", False)),
-            })
-        df = pd.DataFrame(rows)
-        if not df.empty:
-            df["row_id"] = df["row_id"].astype(str)
+        # ----------------------------- Опции фильтров (из БД) -----------------------------
+        all_report_months = sorted(
+            [r[0] for r in session.query(statement.Statement.report_month).distinct().all() if r[0]]
+        )
+        all_report_years = sorted(
+            [int(r[0]) for r in session.query(statement.Statement.report_year).distinct().all() if r[0] is not None]
+        )
+        all_operation_types = sorted(
+            {str(r[0]).strip() for r in session.query(statement.Statement.operation_type).distinct().all() if r[0] and str(r[0]).strip()}
+        )
 
-        text_cols = [
-            "Дата", "Месяц", "Плательщик", "Получатель",
-            "Категория (название)", "Группа (название)",
-            "Тип операции", "Назначение", "Комментарий",
-            "Головная компания", "За кого платили", "row_id"
-        ]
-        for col in text_cols:
-            if col in df.columns:
-                df[col] = df[col].fillna("—")
-        if "Сумма" in df.columns:
-            df["Сумма"] = pd.to_numeric(df["Сумма"], errors="coerce")
+        raw_payer_names = [r[0] for r in session.query(statement.Statement.payer_raw).distinct().all() if r[0]]
+        raw_receiver_names = [r[0] for r in session.query(statement.Statement.receiver_raw).distinct().all() if r[0]]
+
+        company_name_to_ids: dict[str, set[int]] = {}
+        for c in companies:
+            company_name_to_ids.setdefault(c.name, set()).add(c.id)
+
+        firm_name_to_ids: dict[str, set[int]] = {}
+        for f in firms:
+            firm_name_to_ids.setdefault(f.name, set()).add(f.id)
+
+        up_name_to_ids: dict[str, set[int]] = {}
+        for u in up_companies:
+            up_name_to_ids.setdefault(u.name, set()).add(u.id)
+
+        raw_party_names = sorted(set(raw_payer_names + raw_receiver_names))
+        party_name_options = sorted(set(company_name_to_ids.keys()) | set(firm_name_to_ids.keys()) | set(raw_party_names))
+        up_name_options = sorted(up_name_to_ids.keys())
+        group_name_options = sorted(group_name_to_id.keys())
+        cat_name_options = sorted(cat_name_to_id.keys())
 
         # ----------------------------- Фильтры -----------------------------
         st.markdown("### Фильтры")
@@ -109,33 +93,30 @@ def redact_statement():
 
         fstate = st.session_state["stmt_filters"]
 
-        def opts(column):
-            return sorted([x for x in df[column].dropna().unique().tolist()]) if column in df else []
-
         with st.form("stmt_filters_form", clear_on_submit=False, border=True):
             col_up, col_month, col_party = st.columns([1.2, 1.2, 1.6])
             with col_up:
-                sel_up = st.multiselect("Головная компания", options=opts("Головная компания"), default=fstate.get("up_company", []))
-                sel_company = st.multiselect("Компания (плательщик/получатель)", options=opts("Плательщик"), default=fstate.get("company", []))
+                sel_up = st.multiselect("Головная компания", options=up_name_options, default=fstate.get("up_company", []))
+                sel_company = st.multiselect("Компания (плательщик/получатель)", options=party_name_options, default=fstate.get("company", []))
             with col_month:
-                sel_month = st.multiselect("Месяц", options=opts("Месяц"), default=fstate.get("month", []))
-                sel_year = st.multiselect("Год", options=opts("Год"), default=fstate.get("year", []))
+                sel_month = st.multiselect("Месяц", options=all_report_months, default=fstate.get("month", []))
+                sel_year = st.multiselect("Год", options=all_report_years, default=fstate.get("year", []))
                 sel_recorded = st.selectbox(
                     "Записано",
                     options=["Все", "Только новые (не записанные)", "Только записанные"],
                     index=["Все", "Только новые (не записанные)", "Только записанные"].index(fstate.get("recorded", "Все")),
                 )
             with col_party:
-                sel_payer = st.multiselect("Плательщик", options=opts("Плательщик"), default=fstate.get("payer", []))
-                sel_receiver = st.multiselect("Получатель", options=opts("Получатель"), default=fstate.get("receiver", []))
-                sel_za_kogo = st.multiselect("За кого платили", options=opts("За кого платили"), default=fstate.get("za_kogo", []))
+                sel_payer = st.multiselect("Плательщик", options=party_name_options, default=fstate.get("payer", []))
+                sel_receiver = st.multiselect("Получатель", options=party_name_options, default=fstate.get("receiver", []))
+                sel_za_kogo = st.multiselect("За кого платили", options=up_name_options, default=fstate.get("za_kogo", []))
 
             col_cat, col_misc = st.columns([1.3, 1.3])
             with col_cat:
-                sel_group = st.multiselect("Группа", options=opts("Группа (название)"), default=fstate.get("group", []))
-                sel_category = st.multiselect("Категория", options=opts("Категория (название)"), default=fstate.get("category", []))
+                sel_group = st.multiselect("Группа", options=group_name_options, default=fstate.get("group", []))
+                sel_category = st.multiselect("Категория", options=cat_name_options, default=fstate.get("category", []))
             with col_misc:
-                sel_op_type = st.multiselect("Тип операции", options=opts("Тип операции"), default=fstate.get("op_type", []))
+                sel_op_type = st.multiselect("Тип операции", options=all_operation_types, default=fstate.get("op_type", []))
 
             submitted_filters = st.form_submit_button("Применить", type="primary")
 
@@ -154,42 +135,217 @@ def redact_statement():
                 "recorded": sel_recorded,
             }
             st.session_state["stmt_filters_applied"] = True
+            st.session_state["stmt_page"] = 1
+            st.session_state["stmt_page_input"] = 1
 
         if not st.session_state.get("stmt_filters_applied"):
             st.info("Настройте фильтры и нажмите «Применить», чтобы увидеть таблицу.")
             return
 
         fstate = st.session_state["stmt_filters"]
-        current_df = df.copy()
+
+        def _side_party_condition(selected_names, company_col, firm_col, raw_col):
+            if not selected_names:
+                return None, False
+            company_ids = set()
+            firm_ids = set()
+            raw_values = set()
+            for name in selected_names:
+                company_ids.update(company_name_to_ids.get(name, set()))
+                firm_ids.update(firm_name_to_ids.get(name, set()))
+                raw_values.add(name)
+            conds = []
+            if company_ids:
+                conds.append(company_col.in_(sorted(company_ids)))
+            if firm_ids:
+                conds.append(firm_col.in_(sorted(firm_ids)))
+            if raw_values:
+                conds.append(raw_col.in_(sorted(raw_values)))
+            if not conds:
+                return None, True
+            return or_(*conds), False
+
+        where_clauses = []
+
         if fstate.get("up_company"):
-            current_df = current_df[current_df["Головная компания"].isin(fstate["up_company"])]
-        if fstate.get("company"):
-            mask = (current_df["Плательщик"].isin(fstate["company"])) | (current_df["Получатель"].isin(fstate["company"]))
-            current_df = current_df[mask]
+            up_ids = sorted({uid for name in fstate["up_company"] for uid in up_name_to_ids.get(name, set())})
+            where_clauses.append(statement.Statement.up_company_id.in_(up_ids) if up_ids else statement.Statement.id == -1)
+
         if fstate.get("month"):
-            current_df = current_df[current_df["Месяц"].isin(fstate["month"])]
+            where_clauses.append(statement.Statement.report_month.in_(fstate["month"]))
+
         if fstate.get("year"):
-            current_df = current_df[current_df["Год"].isin(fstate["year"])]
-        if fstate.get("payer"):
-            current_df = current_df[current_df["Плательщик"].isin(fstate["payer"])]
-        if fstate.get("receiver"):
-            current_df = current_df[current_df["Получатель"].isin(fstate["receiver"])]
+            year_vals = []
+            for y in fstate["year"]:
+                try:
+                    year_vals.append(int(y))
+                except Exception:
+                    continue
+            where_clauses.append(statement.Statement.report_year.in_(sorted(set(year_vals))) if year_vals else statement.Statement.id == -1)
+
         if fstate.get("group"):
-            current_df = current_df[current_df["Группа (название)"].isin(fstate["group"])]
+            group_ids = sorted({group_name_to_id[gname] for gname in fstate["group"] if gname in group_name_to_id})
+            where_clauses.append(statement.Statement.group_id.in_(group_ids) if group_ids else statement.Statement.id == -1)
+
         if fstate.get("category"):
-            current_df = current_df[current_df["Категория (название)"].isin(fstate["category"])]
+            cat_ids = sorted({cat_name_to_id[cname] for cname in fstate["category"] if cname in cat_name_to_id})
+            where_clauses.append(statement.Statement.category_id.in_(cat_ids) if cat_ids else statement.Statement.id == -1)
+
         if fstate.get("op_type"):
-            current_df = current_df[current_df["Тип операции"].isin(fstate["op_type"])]
+            where_clauses.append(statement.Statement.operation_type.in_(fstate["op_type"]))
+
         if fstate.get("za_kogo"):
-            current_df = current_df[current_df["За кого платили"].isin(fstate["za_kogo"])]
+            zk_ids = sorted({uid for name in fstate["za_kogo"] for uid in up_name_to_ids.get(name, set())})
+            where_clauses.append(statement.Statement.za_kogo_platili_id.in_(zk_ids) if zk_ids else statement.Statement.id == -1)
+
+        company_cond = None
+        if fstate.get("company"):
+            payer_cond, payer_none = _side_party_condition(
+                fstate["company"],
+                statement.Statement.payer_company_id,
+                statement.Statement.payer_firm_id,
+                statement.Statement.payer_raw,
+            )
+            recv_cond, recv_none = _side_party_condition(
+                fstate["company"],
+                statement.Statement.receiver_company_id,
+                statement.Statement.receiver_firm_id,
+                statement.Statement.receiver_raw,
+            )
+            conds = [c for c in (payer_cond, recv_cond) if c is not None]
+            if conds:
+                company_cond = or_(*conds)
+            elif payer_none and recv_none:
+                where_clauses.append(statement.Statement.id == -1)
+        if company_cond is not None:
+            where_clauses.append(company_cond)
+
+        if fstate.get("payer"):
+            payer_cond, payer_none = _side_party_condition(
+                fstate["payer"],
+                statement.Statement.payer_company_id,
+                statement.Statement.payer_firm_id,
+                statement.Statement.payer_raw,
+            )
+            if payer_cond is not None:
+                where_clauses.append(payer_cond)
+            elif payer_none:
+                where_clauses.append(statement.Statement.id == -1)
+
+        if fstate.get("receiver"):
+            recv_cond, recv_none = _side_party_condition(
+                fstate["receiver"],
+                statement.Statement.receiver_company_id,
+                statement.Statement.receiver_firm_id,
+                statement.Statement.receiver_raw,
+            )
+            if recv_cond is not None:
+                where_clauses.append(recv_cond)
+            elif recv_none:
+                where_clauses.append(statement.Statement.id == -1)
 
         rec_filter = fstate.get("recorded", "Все")
         if rec_filter == "Только новые (не записанные)":
-            current_df = current_df[current_df["Записано"] == False]
+            where_clauses.append(statement.Statement.recorded.is_(False))
         elif rec_filter == "Только записанные":
-            current_df = current_df[current_df["Записано"] == True]
+            where_clauses.append(statement.Statement.recorded.is_(True))
 
-        df_filtered = current_df.reset_index(drop=True)
+        filtered_query = session.query(statement.Statement)
+        if where_clauses:
+            filtered_query = filtered_query.filter(*where_clauses)
+
+        total_rows = filtered_query.count()
+        page_size = st.selectbox("Строк на странице", options=[50, 100, 200, 500], index=1, key="stmt_page_size")
+        total_pages = max(1, (total_rows + page_size - 1) // page_size)
+        current_page = min(max(int(st.session_state.get("stmt_page", 1)), 1), total_pages)
+        page_input_value = min(max(int(st.session_state.get("stmt_page_input", current_page)), 1), total_pages)
+        st.session_state["stmt_page_input"] = page_input_value
+        page_col1, page_col2 = st.columns([1, 4])
+        with page_col1:
+            current_page = int(
+                st.number_input(
+                    "Страница",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=page_input_value,
+                    step=1,
+                    key="stmt_page_input",
+                )
+            )
+        st.session_state["stmt_page"] = current_page
+        with page_col2:
+            st.caption(f"Найдено строк: {total_rows}. Показано: {min(page_size, max(total_rows - (current_page - 1) * page_size, 0))}. Страница {current_page}/{total_pages}.")
+
+        page_rows = (
+            filtered_query
+            .order_by(statement.Statement.date.desc(), statement.Statement.id.desc())
+            .offset((current_page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        rows = []
+        row_columns = [
+            "id",
+            "row_id",
+            "Дата",
+            "Месяц",
+            "Год",
+            "Плательщик",
+            "Получатель",
+            "Категория (название)",
+            "Группа (название)",
+            "Тип операции",
+            "Назначение",
+            "Сумма",
+            "Комментарий",
+            "Головная компания",
+            "За кого платили",
+            "Записано",
+        ]
+        for s in page_rows:
+            rid = f"RID_{s.row_id}" if getattr(s, "row_id", None) else "—"
+            rows.append({
+                "id": s.id,
+                "row_id": rid,
+                "Дата": s.date.strftime('%d.%m.%Y') if s.date else "—",
+                "Месяц": s.report_month or "—",
+                "Год": getattr(s, "report_year", None) or "—",
+                "Плательщик": (
+                    company_dict.get(s.payer_company_id)
+                    or firm_dict.get(s.payer_firm_id)
+                    or (getattr(s, "payer_raw", None) or "—")
+                ),
+                "Получатель": (
+                    company_dict.get(s.receiver_company_id)
+                    or firm_dict.get(s.receiver_firm_id)
+                    or (getattr(s, "receiver_raw", None) or "—")
+                ),
+                "Категория (название)": cat_dict.get(s.category_id, "—"),
+                "Группа (название)": group_dict.get(s.group_id, "—"),
+                "Тип операции": s.operation_type or "—",
+                "Назначение": s.purpose or "—",
+                "Сумма": s.amount if s.amount is not None else None,
+                "Комментарий": s.comment or "—",
+                "Головная компания": up_company_dict.get(s.up_company_id, "—"),
+                "За кого платили": up_company_dict.get(getattr(s, "za_kogo_platili_id", None), "—"),
+                "Записано": bool(getattr(s, "recorded", False)),
+            })
+        df_filtered = pd.DataFrame(rows, columns=row_columns).reset_index(drop=True)
+        if not df_filtered.empty:
+            df_filtered["row_id"] = df_filtered["row_id"].astype(str)
+
+        text_cols = [
+            "Дата", "Месяц", "Плательщик", "Получатель",
+            "Категория (название)", "Группа (название)",
+            "Тип операции", "Назначение", "Комментарий",
+            "Головная компания", "За кого платили", "row_id"
+        ]
+        for col in text_cols:
+            if col in df_filtered.columns:
+                df_filtered[col] = df_filtered[col].fillna("—")
+        if "Сумма" in df_filtered.columns:
+            df_filtered["Сумма"] = pd.to_numeric(df_filtered["Сумма"], errors="coerce")
 
         # ----------------------------- Восстановление настроек таблицы (без серверной сортировки) -----------------------------
         saved_state = st.session_state.get("stmt_grid_state")
@@ -263,7 +419,7 @@ def redact_statement():
             "Тип операции",
             editable=True,
             cellEditor="agRichSelectCellEditor",
-            cellEditorParams={"values": sorted(df["Тип операции"].dropna().unique().tolist()) if "Тип операции" in df else []},
+            cellEditorParams={"values": all_operation_types},
             cellEditorPopup=True,
         )
 
@@ -451,9 +607,8 @@ def redact_statement():
                     col1, col2 = st.columns(2)
                     with col1:
                         # Месяц — поддерживаем 'YYYY-MM' и 'Май 2024'
-                        all_rms = [s.report_month for s in stmts if s.report_month]
                         month_label_to_value = {}
-                        for rm in sorted(set(all_rms)):
+                        for rm in sorted(set(all_report_months)):
                             if isinstance(rm, str) and len(rm) == 7 and rm[4] == "-":
                                 label = ru_label_from_rm(rm)
                             else:
@@ -527,7 +682,7 @@ def redact_statement():
                                 or rm_from_ru_label(new_month_label)
                                 or (new_month_label if new_month_label != "—" else None)
                             )
-                            obj.operation_type = (new_type or "").strip().lower()
+                            obj.operation_type = (new_type or "").strip() or None
                             obj.purpose = (new_purpose or None)
                             obj.comment = (new_comment or None)
                             try:
@@ -756,5 +911,3 @@ def redact_statement():
                 except Exception as e:
                     session.rollback()
                     st.error(f"Ошибка при сохранении: {e}")
-
-

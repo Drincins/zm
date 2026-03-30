@@ -3,6 +3,9 @@ import streamlit as st
 from dotenv import load_dotenv
 from streamlit_cookies_manager import EncryptedCookieManager
 
+# Загружаем .env до импортов модулей, которые могут создать подключение к БД.
+load_dotenv()
+
 import tabs.main  # основной роутер по вкладкам
 from utils import auth
 
@@ -10,7 +13,6 @@ from utils import auth
 st.set_page_config(page_title="ZM", layout="wide", initial_sidebar_state="expanded")
 
 # --- Инициализация cookies (шифрует содержимое, чтобы пароли не лежали открыто)
-load_dotenv()
 COOKIE_PASSWORD = os.getenv("COOKIE_PASSWORD")
 if not COOKIE_PASSWORD:
     st.error("Не задан COOKIE_PASSWORD в .env")

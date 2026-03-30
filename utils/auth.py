@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # utils/auth.py
 import os
 import hashlib

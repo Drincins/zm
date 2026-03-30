@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pandas as pd
 import re
 from db_models import company as company_model
@@ -42,6 +44,16 @@ def clean_inn(value: object) -> str:
     return s
 
 
+def clean_account(value: object) -> str:
+    """Нормализация расчётного счета: оставляем только цифры."""
+    if value is None:
+        return ""
+    s = str(value or "").strip()
+    s = s.replace("\u00A0", "").replace(" ", "").replace("\t", "").replace("-", "")
+    s = re.sub(r"[^\d]", "", s)
+    return s
+
+
 # --- Парсер для 1С текстовой выписки ---
 def parse_1c_client_bank(filepath):
     with open(filepath, encoding="utf-8") as f:
@@ -66,8 +78,10 @@ def parse_1c_client_bank(filepath):
         data.append({
             "Плательщик": doc.get("Плательщик", ""),
             "ПлательщикИНН": doc.get("ПлательщикИНН", ""),
+            "ПлательщикСчет": doc.get("ПлательщикРасчСчет") or doc.get("ПлательщикСчет", ""),
             "Получатель": doc.get("Получатель", ""),
             "ПолучательИНН": doc.get("ПолучательИНН", ""),
+            "ПолучательСчет": doc.get("ПолучательРасчСчет") or doc.get("ПолучательСчет", ""),
             "Сумма": doc.get("Сумма", ""),
             "Дата": doc.get("Дата", ""),
             "Номер": doc.get("Номер", ""),
@@ -81,7 +95,7 @@ def parse_1c_client_bank(filepath):
 def parse_bank_statement_to_df(
     filepath,
     session,
-    find_firm_or_company_by_inn,
+    find_firm_or_company,
     find_category,
     find_group
 ):
@@ -113,8 +127,10 @@ def parse_bank_statement_to_df(
     rename_map = {
         'Плательщик': 'payer_raw',
         'ПлательщикИНН': 'payer_inn',
+        'ПлательщикСчет': 'payer_account',
         'Получатель': 'receiver_raw',
         'ПолучательИНН': 'receiver_inn',
+        'ПолучательСчет': 'receiver_account',
         'Назначение': 'purpose',
         'Сумма': 'amount',
         'Дата': 'date',
@@ -127,7 +143,8 @@ def parse_bank_statement_to_df(
     # 3. Гарантируем все нужные поля (модель Statement)
     statement_cols = [
         "row_id", "date", "report_month", "doc_number",
-        "payer_inn", "receiver_inn", "purpose", "amount", "operation_type", "comment", "recorded",
+        "payer_inn", "receiver_inn", "payer_account", "receiver_account",
+        "purpose", "amount", "operation_type", "comment", "recorded",
         "manually_edited", "payer_raw", "receiver_raw",
         "payer_company_id", "payer_firm_id", "receiver_company_id", "receiver_firm_id",
         "up_company_id", "group_id", "category_id",
@@ -136,6 +153,34 @@ def parse_bank_statement_to_df(
     for col in statement_cols + ["date_spisano", "date_postuplenie"]:
         if col not in df.columns:
             df[col] = ""
+
+    # Локальные кэши, чтобы не дергать БД повторно по одинаковым ИНН/категориям/компаниям.
+    identifier_lookup_cache: dict[tuple[str, str], tuple[object | None, object | None]] = {}
+    category_cache: dict[int, object | None] = {}
+    company_up_cache: dict[int, int | None] = {}
+
+    def _cached_find_firm_or_company(inn_value: str, account_value: str) -> tuple[object | None, object | None]:
+        inn_key = clean_inn(inn_value)
+        account_key = clean_account(account_value)
+        if not inn_key and not account_key:
+            return None, None
+        cache_key = (inn_key, account_key)
+        if cache_key not in identifier_lookup_cache:
+            identifier_lookup_cache[cache_key] = find_firm_or_company(inn_key, account_key, session)
+        return identifier_lookup_cache[cache_key]
+
+    def _cached_find_category(cat_id: int):
+        if cat_id not in category_cache:
+            category_cache[cat_id] = find_category(cat_id, session)
+        return category_cache[cat_id]
+
+    def _cached_company_up_id(company_id: int | None) -> int | None:
+        if company_id is None:
+            return None
+        if company_id not in company_up_cache:
+            comp = session.get(company_model.Company, company_id)
+            company_up_cache[company_id] = getattr(comp, "up_company_id", None) if comp else None
+        return company_up_cache[company_id]
 
     # 4. Основная логика по строкам
     new_inns = set()
@@ -210,13 +255,15 @@ def parse_bank_statement_to_df(
         # === Плательщик и получатель (по ИНН) — очистка + fallback без ведущих нулей ===
         # Плательщик
         payer_inn_clean = clean_inn(row.get("payer_inn", ""))
+        payer_account_clean = clean_account(row.get("payer_account", ""))
         df.at[idx, "payer_inn"] = payer_inn_clean
-        firm_obj, company_obj = find_firm_or_company_by_inn(payer_inn_clean, session)
+        df.at[idx, "payer_account"] = payer_account_clean
+        firm_obj, company_obj = _cached_find_firm_or_company(payer_inn_clean, payer_account_clean)
 
         if not firm_obj and not company_obj and payer_inn_clean.startswith("0"):
             alt = payer_inn_clean.lstrip("0")
             if len(alt) in (10, 12):
-                firm_obj, company_obj = find_firm_or_company_by_inn(alt, session)
+                firm_obj, company_obj = _cached_find_firm_or_company(alt, payer_account_clean)
                 if firm_obj or company_obj:
                     payer_inn_clean = alt
                     df.at[idx, "payer_inn"] = alt  # зафиксируем нормализованное значение
@@ -234,13 +281,15 @@ def parse_bank_statement_to_df(
 
         # Получатель
         receiver_inn_clean = clean_inn(row.get("receiver_inn", ""))
+        receiver_account_clean = clean_account(row.get("receiver_account", ""))
         df.at[idx, "receiver_inn"] = receiver_inn_clean
-        firm_obj, company_obj = find_firm_or_company_by_inn(receiver_inn_clean, session)
+        df.at[idx, "receiver_account"] = receiver_account_clean
+        firm_obj, company_obj = _cached_find_firm_or_company(receiver_inn_clean, receiver_account_clean)
 
         if not firm_obj and not company_obj and receiver_inn_clean.startswith("0"):
             alt = receiver_inn_clean.lstrip("0")
             if len(alt) in (10, 12):
-                firm_obj, company_obj = find_firm_or_company_by_inn(alt, session)
+                firm_obj, company_obj = _cached_find_firm_or_company(alt, receiver_account_clean)
                 if firm_obj or company_obj:
                     receiver_inn_clean = alt
                     df.at[idx, "receiver_inn"] = alt
@@ -290,7 +339,7 @@ def parse_bank_statement_to_df(
 
             if chosen_cat_id:
                 df.at[idx, "category_id"] = chosen_cat_id
-                category_obj = find_category(chosen_cat_id, session)
+                category_obj = _cached_find_category(chosen_cat_id)
                 if category_obj and getattr(category_obj, "group_id", None) is not None:
                     df.at[idx, "group_id"] = category_obj.group_id
 
@@ -299,7 +348,7 @@ def parse_bank_statement_to_df(
         cat_id = _safe_int(row.get("category_id", ""))
         if cat_id is None:
             continue
-        cat_obj = find_category(cat_id, session)
+        cat_obj = _cached_find_category(cat_id)
         if not cat_obj:
             continue
         wanted_group_id = cat_obj.group_id  # может быть None
@@ -321,11 +370,7 @@ def parse_bank_statement_to_df(
         else:
             main_cid = payer_cid if payer_cid is not None else receiver_cid
 
-        up_id = None
-        if main_cid is not None:
-            comp = session.get(company_model.Company, main_cid)
-            if comp and getattr(comp, "up_company_id", None):
-                up_id = comp.up_company_id
+        up_id = _cached_company_up_id(main_cid)
 
         if up_id is not None:
             df.at[idx, "up_company_id"] = up_id

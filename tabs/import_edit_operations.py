@@ -1,12 +1,17 @@
+from __future__ import annotations
+
 # tabs/import_edit_operations.py
+from datetime import datetime
+
 import streamlit as st
 import pandas as pd
+from sqlalchemy import or_
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from core.db import SessionLocal
-from core.months import RU_MONTHS, RU_MONTH_NAME_TO_INDEX, ru_label_from_rm, rm_from_ru_label, month_name_from_date
+from core.months import RU_MONTHS, RU_MONTH_NAME_TO_INDEX, month_name_from_date
 from db_models import editbank, statement, firm, company, category, group, up_company
-from core.parser import clean_inn  # единая очистка ИНН
+from core.parser import clean_account, clean_inn  # единая очистка ИНН/счета
 
 
 def _is_rm_yyyy_mm(s: str) -> bool:
@@ -14,8 +19,8 @@ def _is_rm_yyyy_mm(s: str) -> bool:
 
 
 def _resolve_month_year(raw_month: str | None, date_val) -> tuple[str | None, int]:
-    """Вернуть (месяц-словом, год) из разных форматов; год по умолчанию 2025."""
-    default_year = 2025
+    """Вернуть (месяц-словом, год) из разных форматов; год по умолчанию текущий."""
+    default_year = datetime.now().year
     if raw_month:
         raw = str(raw_month).strip()
         # форматы YYYY-MM
@@ -72,21 +77,109 @@ def import_edit_operations_tab():
         company_up_map = {c.id: c.up_company_id for c in companies}  # фолбэк головной компании
         category_map = {c.id: c.name for c in categories}
         group_map = {g.id: g.name for g in groups}
-        category_to_group = {c.id: c.group_id for c in categories}
         up_company_map = {u.id: u.name for u in up_companies}
         up_company_name_to_id = {u.name: u.id for u in up_companies}
 
         # Обратные маппинги и категории по группам (для редактора)
-        group_name_to_id = {v: k for k, v in group_map.items()}
-        cat_name_to_id = {v: k for k, v in category_map.items()}
         cats_by_group: dict[int | None, list[category.Category]] = {}
         for c in categories:
             cats_by_group.setdefault(c.group_id, []).append(c)
 
-        # --- Запрос временных операций ---
-        ops = session.query(editbank.EditBank).order_by(editbank.EditBank.date.desc()).all()
+        # --- SQL-фильтры + пагинация ---
+        up_name_to_ids: dict[str, set[int]] = {}
+        for u in up_companies:
+            up_name_to_ids.setdefault(u.name, set()).add(u.id)
+
+        op_type_options = sorted(
+            {str(r[0]).strip() for r in session.query(editbank.EditBank.operation_type).distinct().all() if r[0] and str(r[0]).strip()}
+        )
+        report_month_options = sorted(
+            [r[0] for r in session.query(editbank.EditBank.report_month).distinct().all() if r[0]]
+        )
+
+        st.session_state.setdefault(
+            "editbank_filters",
+            {"up_company": [], "month": [], "op_type": [], "recorded": "Все"},
+        )
+        fstate = st.session_state["editbank_filters"]
+
+        with st.form("editbank_filters_form", clear_on_submit=False, border=True):
+            st.markdown("### Фильтры")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sel_up = st.multiselect("Головная компания", options=sorted(up_name_to_ids.keys()), default=fstate.get("up_company", []))
+            with c2:
+                sel_month = st.multiselect("Учётный месяц", options=report_month_options, default=fstate.get("month", []))
+            with c3:
+                sel_type = st.multiselect("Тип операции", options=op_type_options, default=fstate.get("op_type", []))
+                sel_recorded = st.selectbox(
+                    "Записано",
+                    options=["Все", "Только новые (не записанные)", "Только записанные"],
+                    index=["Все", "Только новые (не записанные)", "Только записанные"].index(fstate.get("recorded", "Все")),
+                )
+            submitted_filters = st.form_submit_button("Применить", type="primary")
+
+        if submitted_filters:
+            st.session_state["editbank_filters"] = {
+                "up_company": sel_up,
+                "month": sel_month,
+                "op_type": sel_type,
+                "recorded": sel_recorded,
+            }
+            st.session_state["editbank_page"] = 1
+            st.session_state["editbank_page_input"] = 1
+
+        fstate = st.session_state["editbank_filters"]
+        filtered_query = session.query(editbank.EditBank)
+
+        if fstate.get("up_company"):
+            up_ids = sorted({uid for name in fstate["up_company"] for uid in up_name_to_ids.get(name, set())})
+            filtered_query = filtered_query.filter(editbank.EditBank.up_company_id.in_(up_ids)) if up_ids else filtered_query.filter(editbank.EditBank.id == -1)
+
+        if fstate.get("month"):
+            filtered_query = filtered_query.filter(editbank.EditBank.report_month.in_(fstate["month"]))
+
+        if fstate.get("op_type"):
+            filtered_query = filtered_query.filter(editbank.EditBank.operation_type.in_(fstate["op_type"]))
+
+        rec_filter = fstate.get("recorded", "Все")
+        if rec_filter == "Только новые (не записанные)":
+            filtered_query = filtered_query.filter(editbank.EditBank.recorded.is_(False))
+        elif rec_filter == "Только записанные":
+            filtered_query = filtered_query.filter(editbank.EditBank.recorded.is_(True))
+
+        total_rows = filtered_query.count()
+        page_size = st.selectbox("Строк на странице", options=[50, 100, 200, 500], index=1, key="editbank_page_size")
+        total_pages = max(1, (total_rows + page_size - 1) // page_size)
+        current_page = min(max(int(st.session_state.get("editbank_page", 1)), 1), total_pages)
+        page_input_value = min(max(int(st.session_state.get("editbank_page_input", current_page)), 1), total_pages)
+        st.session_state["editbank_page_input"] = page_input_value
+
+        p1, p2 = st.columns([1, 4])
+        with p1:
+            current_page = int(
+                st.number_input(
+                    "Страница",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=page_input_value,
+                    step=1,
+                    key="editbank_page_input",
+                )
+            )
+        st.session_state["editbank_page"] = current_page
+        with p2:
+            st.caption(f"Найдено строк: {total_rows}. Показано: {min(page_size, max(total_rows - (current_page - 1) * page_size, 0))}. Страница {current_page}/{total_pages}.")
+
+        ops = (
+            filtered_query
+            .order_by(editbank.EditBank.date.desc(), editbank.EditBank.id.desc())
+            .offset((current_page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
         if not ops:
-            st.info("Временная таблица пуста. Загрузите выписку для обработки.")
+            st.info("По текущим фильтрам записи не найдены.")
             return
 
         # --- Формируем DataFrame для грида ---
@@ -153,7 +246,7 @@ def import_edit_operations_tab():
 
         # --- Месяцы/годы для селектов ---
         ru_month_opts = RU_MONTHS
-        year_opts = sorted(year_candidates | {2025})
+        year_opts = sorted(year_candidates | {datetime.now().year})
 
         # --- AgGrid (только просмотр) ---
         gb = GridOptionsBuilder.from_dataframe(df)
@@ -282,7 +375,7 @@ def import_edit_operations_tab():
 
                         new_type = st.selectbox(
                             "Тип операции",
-                            options=["списание", "поступление"],
+                            options=["Списание", "Поступление"],
                             index=(0 if (obj.operation_type or "").strip().lower() == "списание" else 1),
                             key=f"edit_type_{sel_id}",
                         )
@@ -324,7 +417,7 @@ def import_edit_operations_tab():
                             obj.report_month = new_month_label or None
                             obj.report_year = int(new_year_val) if new_year_val else None
 
-                            obj.operation_type = (new_type or "").strip().lower()
+                            obj.operation_type = (new_type or "").strip() or None
                             try:
                                 obj.amount = float(new_amount)
                             except Exception:
@@ -404,6 +497,8 @@ def import_edit_operations_tab():
                     doc_number=op_db.doc_number if op_db else None,
                     payer_inn=clean_inn(row.get("ИНН плательщика") or (op_db.payer_inn if op_db else "")),
                     receiver_inn=clean_inn(row.get("ИНН получателя") or (op_db.receiver_inn if op_db else "")),
+                    payer_account=clean_account(op_db.payer_account if op_db else ""),
+                    receiver_account=clean_account(op_db.receiver_account if op_db else ""),
                     purpose=row.get("Назначение") or (op_db.purpose if op_db else None),
                     amount=row.get("Сумма") if pd.notna(row.get("Сумма")) else (op_db.amount if op_db else None),
                     operation_type=row.get("Тип операции") or (op_db.operation_type if op_db else None),
@@ -486,11 +581,15 @@ def import_edit_operations_tab():
                 )
             return name, inn
 
-        # Список проблемных операций (нет группы или категории) — используем только для группировки новых контрагентов
-        ops_missing_cat = []
-        for op in ops:
-            if not op.group_id or not op.category_id:
-                ops_missing_cat.append(op)
+        # Список проблемных операций (нет группы или категории) в пределах текущих SQL-фильтров.
+        # Ограничиваем выборку, чтобы блок новых контрагентов не перегружал страницу.
+        ops_missing_cat = (
+            filtered_query
+            .filter(or_(editbank.EditBank.group_id.is_(None), editbank.EditBank.category_id.is_(None)))
+            .order_by(editbank.EditBank.date.desc(), editbank.EditBank.id.desc())
+            .limit(1000)
+            .all()
+        )
 
         # ---------- Новые контрагенты (нет в базе) с массовым назначением ----------
         # Группируем проблемные операции по паре (имя/ИНН) только если такого контрагента нет среди firms/companies.

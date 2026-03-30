@@ -7,7 +7,7 @@ import streamlit as st
 from sqlalchemy.orm import Session
 
 from core.db import SessionLocal
-from core.parser import clean_inn, parse_bank_statement_to_df
+from core.parser import clean_account, clean_inn, parse_bank_statement_to_df
 from db_models import category, company, editbank, firm, group, up_company
 from db_models import statement as m_statement
 
@@ -40,15 +40,29 @@ def build_archive_destination(file_path: Path) -> Path:
     return dest_path
 
 
-def find_firm_or_company_by_inn(inn, session: Session):
+def find_firm_or_company(inn, account, session: Session):
     inn_norm = clean_inn(inn)
+    account_norm = clean_account(account)
+
+    if account_norm:
+        company_obj = (
+            session.query(company.Company)
+            .filter(company.Company.settlement_account == account_norm)
+            .first()
+        )
+        if company_obj:
+            return None, company_obj
+
     firm_obj = session.query(firm.Firm).filter(firm.Firm.inn == inn_norm).first() if inn_norm else None
-    company_obj = session.query(company.Company).filter(company.Company.inn == inn_norm).first() if inn_norm else None
+    company_matches = session.query(company.Company).filter(company.Company.inn == inn_norm).all() if inn_norm else []
+    company_obj = company_matches[0] if len(company_matches) == 1 else None
     if not (firm_obj or company_obj) and inn_norm:
         alt = inn_norm.lstrip("0")
         if alt != inn_norm and len(alt) in (10, 12):
             firm_obj = firm_obj or session.query(firm.Firm).filter(firm.Firm.inn == alt).first()
-            company_obj = company_obj or session.query(company.Company).filter(company.Company.inn == alt).first()
+            if not company_obj:
+                company_matches = session.query(company.Company).filter(company.Company.inn == alt).all()
+                company_obj = company_matches[0] if len(company_matches) == 1 else None
     return firm_obj, company_obj
 
 
@@ -76,7 +90,7 @@ def parse_file(filepath: Path, session: Session):
             df, new_inns = parse_bank_statement_to_df(
                 str(filepath),
                 session,
-                find_firm_or_company_by_inn,
+                find_firm_or_company,
                 find_category,
                 find_group,
             )
@@ -197,6 +211,8 @@ def _import_df(df: pd.DataFrame, session: Session) -> tuple[int, int, int]:
             doc_number=row.get("doc_number"),
             payer_inn=clean_inn(row.get("payer_inn")),
             receiver_inn=clean_inn(row.get("receiver_inn")),
+            payer_account=clean_account(row.get("payer_account")),
+            receiver_account=clean_account(row.get("receiver_account")),
             purpose=row.get("purpose"),
             amount=row.get("amount"),
             operation_type=row.get("operation_type"),
@@ -401,6 +417,8 @@ def _render_import_new_operations(session: Session):
                     doc_number=row.get("doc_number"),
                     payer_inn=clean_inn(row.get("payer_inn")),
                     receiver_inn=clean_inn(row.get("receiver_inn")),
+                    payer_account=clean_account(row.get("payer_account")),
+                    receiver_account=clean_account(row.get("receiver_account")),
                     purpose=row.get("purpose"),
                     amount=row.get("amount"),
                     operation_type=row.get("operation_type"),

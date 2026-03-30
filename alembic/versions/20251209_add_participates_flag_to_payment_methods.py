@@ -17,10 +17,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "payment_methods",
-        sa.Column("participates_in_daily", sa.Boolean(), nullable=False, server_default=sa.true()),
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = {col["name"] for col in inspector.get_columns("payment_methods")}
+
+    if "participates_in_daily" not in columns:
+        op.add_column(
+            "payment_methods",
+            sa.Column("participates_in_daily", sa.Boolean(), nullable=False, server_default=sa.true()),
+        )
+
     # drop default to keep app-side control
     op.alter_column("payment_methods", "participates_in_daily", server_default=None)
 

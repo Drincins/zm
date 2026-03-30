@@ -2,9 +2,13 @@
 # Настройка подключения к БД и фабрики сессий
 
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from db_models.base import Base  # общий Base + импорт моделей внутри base.py
+
+# Подхватываем .env и при прямом импорте модуля, не полагаясь на порядок импортов в app.py.
+load_dotenv()
 
 # URL можно переопределить через переменную окружения DATABASE_URL
 # пример: postgresql://user:password@host:port/dbname
