@@ -2,11 +2,12 @@ from __future__ import annotations
 
 # tabs/reports_itogbank.py
 import os
+import re
 from datetime import datetime
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from sqlalchemy import or_
-from core.parser import clean_account
 from core.utils import normalize_amount_by_type
 from core.months import format_report_month_label, format_month_year
 
@@ -27,6 +28,105 @@ def _fmt_rub(x: float) -> str:
         return f"{int(round(float(x))):,}".replace(",", " ") + " ₽"
     except Exception:
         return "0 ₽"
+
+
+def _fmt_account(value) -> str:
+    if value is None:
+        return ""
+    digits = re.sub(r"\D+", "", str(value))
+    return digits or ""
+
+
+def _inject_fixed_popover_css(popover_id: str) -> None:
+    st.markdown(
+        f"""
+        <style>
+        [data-codex-fixed-popover="{popover_id}"] {{
+            position: fixed !important;
+            right: auto !important;
+            bottom: auto !important;
+            transform: none !important;
+            max-width: calc(100vw - 2rem) !important;
+            max-height: min(70vh, calc(100vh - 2rem)) !important;
+            overflow: auto !important;
+            z-index: 999999 !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _mount_fixed_popover_hook(popover_id: str) -> None:
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const targetId = {popover_id!r};
+          const iframe = window.frameElement;
+          const root = window.parent && window.parent.document;
+          if (!iframe || !root) return;
+
+          const markPopover = () => {{
+            root
+              .querySelectorAll('[data-codex-fixed-popover="' + targetId + '"]')
+              .forEach((el) => {{
+                if (el.getAttribute("data-baseweb") !== "popover") {{
+                  el.removeAttribute("data-codex-fixed-popover");
+                }}
+              }});
+
+            let node = iframe.parentElement;
+            let candidate = null;
+
+            while (node && node !== root.body) {{
+              if (node.getAttribute && node.getAttribute("data-baseweb") === "popover") {{
+                candidate = node;
+                break;
+              }}
+              node = node.parentElement;
+            }}
+
+            if (candidate) {{
+              candidate.setAttribute("data-codex-fixed-popover", targetId);
+              const margin = 16;
+              const viewportWidth = root.documentElement.clientWidth;
+              const viewportHeight = root.documentElement.clientHeight;
+              const rect = candidate.getBoundingClientRect();
+              const desiredWidth = Math.min(rect.width || 460, viewportWidth - margin * 2);
+              const desiredHeight = Math.min(rect.height || 220, viewportHeight - margin * 2);
+
+              candidate.style.width = desiredWidth + "px";
+              candidate.style.maxWidth = `calc(100vw - ${{margin * 2}}px)`;
+              candidate.style.right = "auto";
+              candidate.style.bottom = "auto";
+              candidate.style.transform = "none";
+
+              const left = Math.min(
+                Math.max(margin, rect.left),
+                Math.max(margin, viewportWidth - desiredWidth - margin),
+              );
+
+              const top = Math.min(
+                Math.max(margin, rect.top),
+                Math.max(margin, viewportHeight - desiredHeight - margin),
+              );
+
+              candidate.style.left = left + "px";
+              candidate.style.top = top + "px";
+            }}
+          }};
+
+          markPopover();
+          window.parent.requestAnimationFrame(markPopover);
+          setTimeout(markPopover, 60);
+          setTimeout(markPopover, 180);
+        }})();
+        </script>
+        """,
+        width=0,
+        height=0,
+    )
 
 def _companies_from_statement(session, up_company_id: int | None) -> list[m_company.Company]:
     q_payer = session.query(m_statement.Statement.payer_company_id).filter(
@@ -262,8 +362,8 @@ def _fetch_df(session, company_ids: list[int] | None, up_company_id: int | None,
         .fillna(df["_receiver_raw"])
         .fillna("")
     )
-    df["Счет плательщика"] = df["_payer_account"].map(clean_account).fillna("")
-    df["Счет получателя"] = df["_receiver_account"].map(clean_account).fillna("")
+    df["Счет плательщика"] = df["_payer_account"].map(_fmt_account).fillna("")
+    df["Счет получателя"] = df["_receiver_account"].map(_fmt_account).fillna("")
     df["Головная компания"] = df["_up_company_id"].map(up_name_by_id).fillna("")
     # Отображение «За кого платили» — корректное имя поля
     if "_za_kogo_platili_id" in df.columns:
@@ -673,8 +773,8 @@ def _render_reports_itogbank(session):
             )
             st.caption(op_labels.get(selected_id, ""))
             obj = session.get(m_statement.Statement, selected_id)
-            st.markdown(f"**Счет плательщика:** {clean_account(getattr(obj, 'payer_account', None)) or '—'}")
-            st.markdown(f"**Счет получателя:** {clean_account(getattr(obj, 'receiver_account', None)) or '—'}")
+            st.markdown(f"**Счет плательщика:** {_fmt_account(getattr(obj, 'payer_account', None)) or '—'}")
+            st.markdown(f"**Счет получателя:** {_fmt_account(getattr(obj, 'receiver_account', None)) or '—'}")
 
             # Справочники
             groups = session.query(m_group.Group).order_by(m_group.Group.name.asc()).all()
@@ -780,88 +880,60 @@ def _render_reports_itogbank(session):
         cat_count_unrec = int(len(ops_unrec))
         cat_sum_unrec = float(pd.to_numeric(ops_unrec["Сумма"], errors="coerce").fillna(0).sum()) if cat_count_unrec else 0.0
 
+        def _record_category_ops() -> None:
+            try:
+                cat_ids = [
+                    r[0]
+                    for r in session.query(m_cat.Category.id)
+                    .filter(m_cat.Category.name == selected_category)
+                    .all()
+                ]
+                if not cat_ids:
+                    st.warning("Категория не найдена по текущему выбору.")
+                    return
+
+                upd = (
+                    m_statement.Statement.__table__.update()
+                    .where(m_statement.Statement.report_month.in_(sel_months))
+                    .where(m_statement.Statement.category_id.in_(cat_ids))
+                    .where(
+                        or_(
+                            m_statement.Statement.recorded == False,
+                            m_statement.Statement.recorded.is_(None),
+                        )
+                    )
+                )
+                if company_ids:
+                    upd = upd.where(
+                        or_(
+                            m_statement.Statement.payer_company_id.in_(company_ids),
+                            m_statement.Statement.receiver_company_id.in_(company_ids),
+                        )
+                    )
+                if up_selected_id:
+                    upd = upd.where(m_statement.Statement.up_company_id == up_selected_id)
+
+                res = session.execute(upd.values(recorded=True))
+                session.commit()
+                st.success(f"Помечено 'Записано': {res.rowcount} операций")
+                st.rerun()
+            except Exception as e:
+                session.rollback()
+                st.error(f"Ошибка массовой пометки: {e}")
+
         if cat_count_unrec == 0:
             st.info("В выбранной категории нет новых (не записанных) операций для пометки.")
         else:
-            _pop = getattr(st, "popover", None)
-            if _pop:
-                with _pop("✅ Записать новые операции категории (подтверждение)"):
-                    st.info(
-                        f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
-                        f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
-                    )
-                    if st.button("Подтвердить запись", key="confirm_record_category"):
-                        try:
-                            cat_ids = [r[0] for r in session.query(m_cat.Category.id)
-                                    .filter(m_cat.Category.name == selected_category).all()]
-                            if not cat_ids:
-                                st.warning("Категория не найдена по текущему выбору.")
-                            else:
-                                upd = (
-                                    m_statement.Statement.__table__.update()
-                                    .where(m_statement.Statement.report_month.in_(sel_months))
-                                    .where(m_statement.Statement.category_id.in_(cat_ids))
-                                    .where(or_(  # только незаписанные (False или NULL)
-                                        m_statement.Statement.recorded == False,
-                                        m_statement.Statement.recorded.is_(None)
-                                    ))
-                                )
-                                if company_ids:
-                                    upd = upd.where(
-                                        or_(
-                                            m_statement.Statement.payer_company_id.in_(company_ids),
-                                            m_statement.Statement.receiver_company_id.in_(company_ids),
-                                        )
-                                    )
-                                if up_selected_id:
-                                    upd = upd.where(m_statement.Statement.up_company_id == up_selected_id)
-
-                                res = session.execute(upd.values(recorded=True))
-                                session.commit()
-                                st.success(f"Помечено 'Записано': {res.rowcount} операций")
-                                st.rerun()
-                        except Exception as e:
-                            session.rollback()
-                            st.error(f"Ошибка массовой пометки: {e}")
-            else:
-                with st.expander("✅ Записать новые операции категории (подтверждение)"):
-                    st.info(
-                        f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
-                        f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
-                    )
-                    if st.button("Подтвердить запись", key="confirm_record_category_fallback"):
-                        try:
-                            cat_ids = [r[0] for r in session.query(m_cat.Category.id)
-                                    .filter(m_cat.Category.name == selected_category).all()]
-                            if not cat_ids:
-                                st.warning("Категория не найдена по текущему выбору.")
-                            else:
-                                upd = (
-                                    m_statement.Statement.__table__.update()
-                                    .where(m_statement.Statement.report_month.in_(sel_months))
-                                    .where(m_statement.Statement.category_id.in_(cat_ids))
-                                    .where(or_(
-                                        m_statement.Statement.recorded == False,
-                                        m_statement.Statement.recorded.is_(None)
-                                    ))
-                                )
-                                if company_ids:
-                                    upd = upd.where(
-                                        or_(
-                                            m_statement.Statement.payer_company_id.in_(company_ids),
-                                            m_statement.Statement.receiver_company_id.in_(company_ids),
-                                        )
-                                    )
-                                if up_selected_id:
-                                    upd = upd.where(m_statement.Statement.up_company_id == up_selected_id)
-
-                                res = session.execute(upd.values(recorded=True))
-                                session.commit()
-                                st.success(f"Помечено 'Записано': {res.rowcount} операций")
-                                st.rerun()
-                        except Exception as e:
-                            session.rollback()
-                            st.error(f"Ошибка массовой пометки: {e}")
+            popover_id = "record-category-confirm"
+            _inject_fixed_popover_css(popover_id)
+            with st.popover("✅ Записать новые операции категории"):
+                _mount_fixed_popover_hook(popover_id)
+                st.info(
+                    f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
+                    f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
+                )
+                if st.button("Подтвердить запись", key="confirm_record_category_popover", type="primary"):
+                    _record_category_ops()
     # Если выбран другой режим («Все операции»/«Только записанные») — кнопку не показываем.
 
 
