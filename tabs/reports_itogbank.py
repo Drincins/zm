@@ -6,7 +6,6 @@ import re
 from datetime import datetime
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from sqlalchemy import or_
 from core.utils import normalize_amount_by_type
 from core.months import format_report_month_label, format_month_year
@@ -35,98 +34,6 @@ def _fmt_account(value) -> str:
         return ""
     digits = re.sub(r"\D+", "", str(value))
     return digits or ""
-
-
-def _inject_fixed_popover_css(popover_id: str) -> None:
-    st.markdown(
-        f"""
-        <style>
-        [data-codex-fixed-popover="{popover_id}"] {{
-            position: fixed !important;
-            right: auto !important;
-            bottom: auto !important;
-            transform: none !important;
-            max-width: calc(100vw - 2rem) !important;
-            max-height: min(70vh, calc(100vh - 2rem)) !important;
-            overflow: auto !important;
-            z-index: 999999 !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _mount_fixed_popover_hook(popover_id: str) -> None:
-    components.html(
-        f"""
-        <script>
-        (function() {{
-          const targetId = {popover_id!r};
-          const iframe = window.frameElement;
-          const root = window.parent && window.parent.document;
-          if (!iframe || !root) return;
-
-          const markPopover = () => {{
-            root
-              .querySelectorAll('[data-codex-fixed-popover="' + targetId + '"]')
-              .forEach((el) => {{
-                if (el.getAttribute("data-baseweb") !== "popover") {{
-                  el.removeAttribute("data-codex-fixed-popover");
-                }}
-              }});
-
-            let node = iframe.parentElement;
-            let candidate = null;
-
-            while (node && node !== root.body) {{
-              if (node.getAttribute && node.getAttribute("data-baseweb") === "popover") {{
-                candidate = node;
-                break;
-              }}
-              node = node.parentElement;
-            }}
-
-            if (candidate) {{
-              candidate.setAttribute("data-codex-fixed-popover", targetId);
-              const margin = 16;
-              const viewportWidth = root.documentElement.clientWidth;
-              const viewportHeight = root.documentElement.clientHeight;
-              const rect = candidate.getBoundingClientRect();
-              const desiredWidth = Math.min(rect.width || 460, viewportWidth - margin * 2);
-              const desiredHeight = Math.min(rect.height || 220, viewportHeight - margin * 2);
-
-              candidate.style.width = desiredWidth + "px";
-              candidate.style.maxWidth = `calc(100vw - ${{margin * 2}}px)`;
-              candidate.style.right = "auto";
-              candidate.style.bottom = "auto";
-              candidate.style.transform = "none";
-
-              const left = Math.min(
-                Math.max(margin, rect.left),
-                Math.max(margin, viewportWidth - desiredWidth - margin),
-              );
-
-              const top = Math.min(
-                Math.max(margin, rect.top),
-                Math.max(margin, viewportHeight - desiredHeight - margin),
-              );
-
-              candidate.style.left = left + "px";
-              candidate.style.top = top + "px";
-            }}
-          }};
-
-          markPopover();
-          window.parent.requestAnimationFrame(markPopover);
-          setTimeout(markPopover, 60);
-          setTimeout(markPopover, 180);
-        }})();
-        </script>
-        """,
-        width=0,
-        height=0,
-    )
 
 def _companies_from_statement(session, up_company_id: int | None) -> list[m_company.Company]:
     q_payer = session.query(m_statement.Statement.payer_company_id).filter(
@@ -924,16 +831,44 @@ def _render_reports_itogbank(session):
         if cat_count_unrec == 0:
             st.info("В выбранной категории нет новых (не записанных) операций для пометки.")
         else:
-            popover_id = "record-category-confirm"
-            _inject_fixed_popover_css(popover_id)
-            with st.popover("✅ Записать новые операции категории"):
-                _mount_fixed_popover_hook(popover_id)
-                st.info(
-                    f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
-                    f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
-                )
-                if st.button("Подтвердить запись", key="confirm_record_category_popover", type="primary"):
-                    _record_category_ops()
+            confirm_open_key = "record_category_confirm_open"
+            trigger_col, _ = st.columns([2, 5])
+            with trigger_col:
+                if st.button(
+                    "✅ Записать новые операции категории",
+                    key="toggle_record_category_confirm",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    st.session_state[confirm_open_key] = not st.session_state.get(confirm_open_key, False)
+
+            if st.session_state.get(confirm_open_key, False):
+                confirm_col, _ = st.columns([3, 4])
+                with confirm_col:
+                    with st.container(border=True):
+                        st.markdown("**Подтверждение записи**")
+                        st.info(
+                            f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
+                            f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
+                        )
+                        action_col, cancel_col = st.columns(2)
+                        with action_col:
+                            if st.button(
+                                "Подтвердить запись",
+                                key="confirm_record_category_inline",
+                                type="primary",
+                                use_container_width=True,
+                            ):
+                                st.session_state[confirm_open_key] = False
+                                _record_category_ops()
+                        with cancel_col:
+                            if st.button(
+                                "Отмена",
+                                key="cancel_record_category_inline",
+                                use_container_width=True,
+                            ):
+                                st.session_state[confirm_open_key] = False
+                                st.rerun()
     # Если выбран другой режим («Все операции»/«Только записанные») — кнопку не показываем.
 
 
