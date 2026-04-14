@@ -831,44 +831,23 @@ def _render_reports_itogbank(session):
         if cat_count_unrec == 0:
             st.info("В выбранной категории нет новых (не записанных) операций для пометки.")
         else:
-            confirm_open_key = "record_category_confirm_open"
             trigger_col, _ = st.columns([2, 5])
             with trigger_col:
-                if st.button(
+                with st.popover(
                     "✅ Записать новые операции категории",
-                    key="toggle_record_category_confirm",
-                    type="primary",
-                    use_container_width=True,
+                    width="content",
                 ):
-                    st.session_state[confirm_open_key] = not st.session_state.get(confirm_open_key, False)
-
-            if st.session_state.get(confirm_open_key, False):
-                confirm_col, _ = st.columns([3, 4])
-                with confirm_col:
-                    with st.container(border=True):
-                        st.markdown("**Подтверждение записи**")
-                        st.info(
-                            f"Будут помечены как **«Записано»** все **новые** операции категории **{selected_category}** "
-                            f"по текущему срезу.\n\nКоличество: **{cat_count_unrec}**, сумма: **{_fmt_rub(cat_sum_unrec)}**."
-                        )
-                        action_col, cancel_col = st.columns(2)
-                        with action_col:
-                            if st.button(
-                                "Подтвердить запись",
-                                key="confirm_record_category_inline",
-                                type="primary",
-                                use_container_width=True,
-                            ):
-                                st.session_state[confirm_open_key] = False
-                                _record_category_ops()
-                        with cancel_col:
-                            if st.button(
-                                "Отмена",
-                                key="cancel_record_category_inline",
-                                use_container_width=True,
-                            ):
-                                st.session_state[confirm_open_key] = False
-                                st.rerun()
+                    st.markdown("**Подтверждение записи**")
+                    st.caption(f"Категория: {selected_category}")
+                    st.caption(f"Количество: {cat_count_unrec}")
+                    st.caption(f"Сумма: {_fmt_rub(cat_sum_unrec)}")
+                    if st.button(
+                        "Подтвердить запись",
+                        key="confirm_record_category_popover",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        _record_category_ops()
     # Если выбран другой режим («Все операции»/«Только записанные») — кнопку не показываем.
 
 
